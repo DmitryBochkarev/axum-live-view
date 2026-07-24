@@ -37,7 +37,7 @@
     missing_debug_implementations,
     missing_docs
 )]
-#![deny(unreachable_pub, private_in_public)]
+#![deny(unreachable_pub)]
 #![allow(elided_lifetimes_in_paths, clippy::type_complexity)]
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -105,10 +105,17 @@ enum HtmlNode {
 
 impl Parse for HtmlNode {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Token![<]) && input.peek2(Token![!]) {
-            input.parse().map(Self::Doctype)
-        } else if input.peek(Token![<]) && !input.peek2(Token![/]) {
-            input.parse().map(Self::TagNode)
+        if input.peek(Token![<]) {
+            let fork = input.fork();
+            fork.parse::<Token![<]>().unwrap();
+            if fork.peek(Token![!]) {
+                input.parse().map(Self::Doctype)
+            } else if !fork.peek(Token![/]) {
+                input.parse().map(Self::TagNode)
+            } else {
+                let span = input.span();
+                Err(syn::Error::new(span, "Unexpected token"))
+            }
         } else if input.peek(LitStr) {
             input.parse().map(Self::LitStr)
         } else if let Ok(block) = input.parse() {
@@ -189,7 +196,10 @@ impl Parse for TagNode {
 
         input.parse::<Token![>]>()?;
 
-        let next_is_close = || input.peek(Token![<]) && input.peek2(Token![/]);
+        let next_is_close = || {
+            let fork = input.fork();
+            fork.parse::<Token![<]>().is_ok() && fork.peek(Token![/])
+        };
         let mut inner = Vec::new();
         while !next_is_close() {
             inner.push(input.parse::<HtmlNode>()?);
@@ -414,7 +424,7 @@ where
     fn parse(input: ParseStream) -> syn::Result<Self> {
         input.parse::<Token![if]>()?;
 
-        let cond = input.call(syn::Expr::parse_without_eager_brace)?;
+        let cond = syn::Expr::parse_without_eager_brace(input)?;
 
         let content;
         syn::braced!(content in input);
@@ -450,10 +460,10 @@ struct For {
 impl Parse for For {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         input.parse::<Token![for]>()?;
-        let pat = input.parse::<syn::Pat>()?;
+        let pat = syn::Pat::parse_single(input)?;
 
         input.parse::<Token![in]>()?;
-        let expr = input.call(syn::Expr::parse_without_eager_brace)?;
+        let expr = syn::Expr::parse_without_eager_brace(input)?;
 
         let content;
         syn::braced!(content in input);
@@ -473,13 +483,13 @@ impl Parse for Match {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         input.parse::<Token![match]>()?;
 
-        let expr = input.call(syn::Expr::parse_without_eager_brace)?;
+        let expr = syn::Expr::parse_without_eager_brace(input)?;
 
         let content;
         syn::braced!(content in input);
         let mut arms = Vec::new();
         while !content.is_empty() {
-            arms.push(content.call(Arm::parse)?);
+            arms.push(content.parse::<Arm>()?);
         }
 
         Ok(Self { expr, arms })
@@ -495,7 +505,7 @@ struct Arm {
 
 impl Parse for Arm {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let pat = input.parse::<syn::Pat>()?;
+        let pat = syn::Pat::parse_single(input)?;
 
         let guard = if input.parse::<Token![if]>().is_ok() {
             let expr = input.parse::<syn::Expr>()?;

@@ -1,7 +1,6 @@
 //! Extractor for embedding live views in HTML templates.
 
 use crate::{html::Html, life_cycle::run_view, LiveView};
-use async_trait::async_trait;
 use axum::{
     extract::{
         ws::{self, WebSocket, WebSocketUpgrade},
@@ -31,7 +30,6 @@ enum LiveViewUpgradeInner {
     Ws(Box<(WebSocketUpgrade, Uri, HeaderMap)>),
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for LiveViewUpgrade
 where
     S: Send + Sync + 'static,
@@ -140,7 +138,7 @@ where
     let (write, read) = socket.split();
 
     let write = write.with(|msg| async move {
-        let encoded_msg = ws::Message::Text(serde_json::to_string(&msg)?);
+        let encoded_msg = ws::Message::Text(serde_json::to_string(&msg)?.into());
         Ok::<_, anyhow::Error>(encoded_msg)
     });
     futures_util::pin_mut!(write);

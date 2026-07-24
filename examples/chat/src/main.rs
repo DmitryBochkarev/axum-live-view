@@ -17,7 +17,7 @@ use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
-use tokio::sync::broadcast;
+use tokio::{net::TcpListener, sync::broadcast};
 use tower::ServiceBuilder;
 
 #[tokio::main]
@@ -38,10 +38,8 @@ async fn main() {
         );
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let listener = TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 type Messages = Arc<Mutex<Vec<Message>>>;
