@@ -5,10 +5,10 @@
   "main": "dist/src/live_view.js",
   "typings": "dist/src/live_view.d.ts",
   "devDependencies": {
-    "typescript": "^4.5.4"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
-    "morphdom": "^2.6.1"
+    "morphdom": "^2.7.8"
   },
   "scripts": {
     "build": "tsc",

@@ -4,6 +4,6 @@
   },
   "private": true,
   "devDependencies": {
-    "webpack-cli": "^4.9.1"
+    "webpack-cli": "^5.1.4"
   }
 }
