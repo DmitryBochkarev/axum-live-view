@@ -29,6 +29,7 @@ fn main() -> Result {
         Opt::Ts(Ts::Build(opt)) => ts_build(opt)?,
         Opt::Ts(Ts::Precompile(opt)) => ts_precompile(opt)?,
         Opt::Codegen => codegen()?,
+        Opt::TestIntegration => test_integration()?,
     }
 
     Ok(())
@@ -39,6 +40,8 @@ enum Opt {
     #[command(subcommand)]
     Ts(Ts),
     Codegen,
+    /// Run headless browser integration tests for examples
+    TestIntegration,
 }
 
 /// Typescript related commands
@@ -168,6 +171,53 @@ fn run_cmd(mut cmd: Command) -> Result {
     let desc = format!("{:?}", cmd);
     let status = cmd.status()?;
     ensure!(status.success(), "`{}` failed", desc);
+    Ok(())
+}
+
+fn test_integration() -> Result {
+    // 0. Kill any leftover server from previous runs
+    let _ = Command::new("pkill")
+        .args(&["-f", "example-todo"])
+        .status();
+
+    // 1. Build the JavaScript bundle
+    println!("→ Building JavaScript bundle...");
+    ts_precompile(TsPrecompile {
+        check: false,
+        no_install: false,
+    })?;
+
+    // 2. Build the todo example server
+    println!("→ Building todo example...");
+    let mut build_cmd = Command::new("cargo");
+    build_cmd
+        .current_dir(project_root())
+        .args(&["build", "-p", "example-todo"]);
+    run_cmd(build_cmd)?;
+
+    // 3. Install integration test dependencies
+    println!("→ Installing integration test dependencies...");
+    let integration_dir = project_root().join("integration-tests");
+    let mut install_cmd = Command::new("npm");
+    install_cmd
+        .current_dir(&integration_dir)
+        .arg("install");
+    run_cmd(install_cmd)?;
+
+    // 4. Run the Playwright tests
+    println!("→ Running integration tests...");
+    let mut test_cmd = Command::new("npx");
+    test_cmd
+        .current_dir(&integration_dir)
+        .args(&["playwright", "test", "--config=playwright.config.ts"]);
+    run_cmd(test_cmd)?;
+
+    // 5. Clean up the server
+    let _ = Command::new("pkill")
+        .args(&["-f", "example-todo"])
+        .status();
+
+    println!("✓ Integration tests passed");
     Ok(())
 }
 

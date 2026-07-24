@@ -686,7 +686,18 @@ function patchTemplate(template: Template, diff: TemplateDiff) {
 
       } else if (typeof diffVal === "object") {
         const current = template[key]
-        if (current === undefined) { continue }
+        if (current === undefined) {
+          // New entry that didn't exist before (e.g., after a previous delete).
+          // Create it from the diff.
+          if ("d" in diffVal) {
+            template[key] = <TemplateDynamic>diffVal
+          } else if ("b" in diffVal) {
+            template[key] = <TemplateLoop>diffVal
+          } else if ("f" in diffVal) {
+            template[key] = <TemplateDynamic>diffVal
+          }
+          continue
+        }
 
         if ("d" in diffVal) {
           if (typeof current === "string") {
