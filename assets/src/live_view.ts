@@ -630,31 +630,31 @@ function updateDomFromState(socket: WebSocket, state: State, options: LiveViewOp
         }
         return node
       },
-      onBeforeElUpdated: (fromEl, toEl) => {
-        if (fromEl instanceof HTMLInputElement && toEl instanceof HTMLInputElement) {
-          if (toEl.getAttribute("type") === "radio" || toEl.getAttribute("type") === "checkbox") {
-            toEl.checked = fromEl.checked;
-          } else {
-            toEl.value = fromEl.value;
-          }
-        }
+      // onBeforeElUpdated: (fromEl, toEl) => {
+        // if (fromEl instanceof HTMLInputElement && toEl instanceof HTMLInputElement) {
+        //   if (toEl.getAttribute("type") === "radio" || toEl.getAttribute("type") === "checkbox") {
+        //     toEl.checked = fromEl.checked;
+        //   } else {
+        //     toEl.value = fromEl.value;
+        //   }
+        // }
 
-        if (fromEl instanceof HTMLTextAreaElement && toEl instanceof HTMLTextAreaElement) {
-          toEl.value = fromEl.value;
-        }
+        // if (fromEl instanceof HTMLTextAreaElement && toEl instanceof HTMLTextAreaElement) {
+        //   toEl.value = fromEl.value;
+        // }
 
-        if (fromEl instanceof HTMLOptionElement && toEl instanceof HTMLOptionElement) {
-          if (toEl.closest("select")?.hasAttribute("multiple")) {
-            toEl.selected = fromEl.selected
-          }
-        }
+        // if (fromEl instanceof HTMLOptionElement && toEl instanceof HTMLOptionElement) {
+        //   if (toEl.closest("select")?.hasAttribute("multiple")) {
+        //     toEl.selected = fromEl.selected
+        //   }
+        // }
 
-        if (fromEl instanceof HTMLSelectElement && toEl instanceof HTMLSelectElement && !toEl.hasAttribute("multiple")) {
-          toEl.value = fromEl.value
-        }
+        // if (fromEl instanceof HTMLSelectElement && toEl instanceof HTMLSelectElement && !toEl.hasAttribute("multiple")) {
+        //   toEl.value = fromEl.value
+        // }
 
-        return true
-      },
+      //   return true
+      // },
     })
 
     const attrs = Object.values(axm_window).map((attr) => `[${attr}]`).join(", ")

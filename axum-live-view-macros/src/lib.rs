@@ -702,17 +702,18 @@ impl NodeToTokens for Attr {
                 NormalAttrValue::LitStr(lit_str) => {
                     fixed.append(" ");
                     ident.node_to_tokens(fixed, out);
-                    fixed.append(format!("={}", lit_str.value()));
+                    fixed.append(format!("=\"{}\"", lit_str.value()));
                 }
                 NormalAttrValue::Block(block) => {
                     fixed.append(" ");
                     ident.node_to_tokens(fixed, out);
-                    fixed.append("=");
+                    fixed.append("=\"");
                     fixed.start_new_part();
                     out.extend(quote! {
                         #[allow(unused_braces)]
                         __dynamic.push_fragment(format!("{}", #block));
                     });
+                    fixed.append("\"");
                 }
                 NormalAttrValue::If(if_) => {
                     let if_ = if_.clone().map(|attr_value| Self::Normal {
