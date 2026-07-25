@@ -141,7 +141,8 @@ function onMessage(
 
   if (msg.t === "i") {
     state.viewState = msg.d
-    updateDomFromState(socket, state, options)
+    // DOM is already populated from the initial HTTP response,
+    // so we only need to bind event listeners (no morph needed).
     bindInitialEvents(socket, options)
 
   } else if (msg.t === "r") {
