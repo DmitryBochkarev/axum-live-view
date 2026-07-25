@@ -175,9 +175,12 @@ fn run_cmd(mut cmd: Command) -> Result {
 }
 
 fn test_integration() -> Result {
-    // 0. Kill any leftover server from previous runs
+    // 0. Kill any leftover servers from previous runs
     let _ = Command::new("pkill")
         .args(&["-f", "example-todo"])
+        .status();
+    let _ = Command::new("pkill")
+        .args(&["-f", "example-counter-sse"])
         .status();
 
     // 1. Build the JavaScript bundle
@@ -187,12 +190,19 @@ fn test_integration() -> Result {
         no_install: false,
     })?;
 
-    // 2. Build the todo example server
+    // 2. Build the example servers
     println!("→ Building todo example...");
     let mut build_cmd = Command::new("cargo");
     build_cmd
         .current_dir(project_root())
         .args(&["build", "-p", "example-todo"]);
+    run_cmd(build_cmd)?;
+
+    println!("→ Building counter-sse example...");
+    let mut build_cmd = Command::new("cargo");
+    build_cmd
+        .current_dir(project_root())
+        .args(&["build", "-p", "example-counter-sse"]);
     run_cmd(build_cmd)?;
 
     // 3. Install integration test dependencies
@@ -212,9 +222,12 @@ fn test_integration() -> Result {
         .args(&["playwright", "test", "--config=playwright.config.ts"]);
     run_cmd(test_cmd)?;
 
-    // 5. Clean up the server
+    // 5. Clean up any remaining servers
     let _ = Command::new("pkill")
         .args(&["-f", "example-todo"])
+        .status();
+    let _ = Command::new("pkill")
+        .args(&["-f", "example-counter-sse"])
         .status();
 
     println!("✓ Integration tests passed");

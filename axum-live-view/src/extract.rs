@@ -131,7 +131,7 @@ impl LiveViewUpgrade {
     }
 }
 
-async fn run_view_on_socket<L>(socket: WebSocket, view: L, uri: Uri, headers: HeaderMap)
+pub(crate) async fn run_view_on_socket<L>(socket: WebSocket, view: L, uri: Uri, headers: HeaderMap)
 where
     L: LiveView,
 {

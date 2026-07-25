@@ -1,41 +1,64 @@
 use axum::{
-    extract::Extension,
     http::{HeaderMap, Uri},
-    response::IntoResponse,
-    routing::get,
-    Router,
+    Extension, Router,
 };
 use axum_live_view::{
     event_data::EventData,
     html, js_command,
     live_view::{self, Updated, ViewHandle},
-    Html, LiveView, LiveViewUpgrade,
+    page, sse::LiveViewSseState, Html, LiveView,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    convert::Infallible,
     net::SocketAddr,
     sync::{Arc, Mutex},
 };
 use tokio::{net::TcpListener, sync::broadcast};
-use tower::ServiceBuilder;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    let sse = Arc::new(LiveViewSseState::new());
     let messages: Messages = Default::default();
-
     let (tx, _) = broadcast::channel::<NewMessagePing>(1024);
 
     let app = Router::new()
-        .route("/", get(root))
+        .merge(page::live_view_page("/", {
+            let messages = messages.clone();
+            let tx = tx.clone();
+            move |embed| {
+                let list = MessagesList {
+                    messages: messages.clone(),
+                    tx: tx.clone(),
+                };
+                let form = SendMessageForm {
+                    message: Default::default(),
+                    name: Default::default(),
+                    messages: messages.clone(),
+                    tx: tx.clone(),
+                };
+                let combined = live_view::combine((list, form), |list, form| {
+                    html! {
+                        { list }
+                        <hr />
+                        { form }
+                    }
+                });
+                html! {
+                    <!DOCTYPE html>
+                    <html>
+                        <head></head>
+                        <body>
+                            { embed.embed(combined) }
+                            <script src="/bundle.js"></script>
+                        </body>
+                    </html>
+                }
+            }
+        }))
         .route("/bundle.js", axum_live_view::precompiled_js())
-        .layer(
-            ServiceBuilder::new()
-                .layer(Extension(messages))
-                .layer(Extension(tx)),
-        );
+        .layer(Extension(sse));
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -50,46 +73,6 @@ type Messages = Arc<Mutex<Vec<Message>>>;
 
 #[derive(Clone, Copy)]
 struct NewMessagePing;
-
-async fn root(
-    live: LiveViewUpgrade,
-    Extension(messages): Extension<Messages>,
-    Extension(tx): Extension<broadcast::Sender<NewMessagePing>>,
-) -> impl IntoResponse {
-    let list = MessagesList {
-        messages: messages.clone(),
-        tx: tx.clone(),
-    };
-
-    let form = SendMessageForm {
-        message: Default::default(),
-        name: Default::default(),
-        messages,
-        tx,
-    };
-
-    let combined = live_view::combine((list, form), |list, form| {
-        html! {
-            { list }
-            <hr />
-            { form }
-        }
-    });
-
-    live.response(move |embed| {
-        html! {
-            <!DOCTYPE html>
-            <html>
-                <head>
-                </head>
-                <body>
-                    { embed.embed(combined) }
-                    <script src="/bundle.js"></script>
-                </body>
-            </html>
-        }
-    })
-}
 
 struct MessagesList {
     messages: Messages,
@@ -195,7 +178,6 @@ impl LiveView for SendMessageForm {
                     placeholder="Your name"
                     axm-input={ FormMsg::NameChange }
                 />
-
                 <div>
                     <input
                         id="text-input"
@@ -204,7 +186,6 @@ impl LiveView for SendMessageForm {
                         placeholder="Message..."
                         axm-input={ FormMsg::MessageChange }
                     />
-
                     <input
                         type="submit"
                         value="Send!"

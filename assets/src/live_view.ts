@@ -25,14 +25,69 @@ interface LiveViewOptions {
 
 interface State {
   viewState?: Template;
+  sseId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Transport abstraction
+// ---------------------------------------------------------------------------
+
+interface Transport {
+  send(msg: MessageToView): void;
+  disconnect(): void;
+}
+
+// ---------------------------------------------------------------------------
+// Connection entry point
+// ---------------------------------------------------------------------------
+
+/// Reads <meta name="live-view-transport" content="..."> from the page head.
+/// Supported values: "sse", "websocket" (or "ws"), "auto" (default).
+function detectTransportPreference(): "sse" | "websocket" | "auto" {
+  const meta = document.querySelector("meta[name='live-view-transport']")
+  if (!meta) {
+    return "auto"
+  }
+  const content = meta.getAttribute("content")?.toLowerCase() || ""
+  if (content === "sse" || content === "server-sent-events") {
+    return "sse"
+  }
+  if (content === "websocket" || content === "ws") {
+    return "websocket"
+  }
+  return "auto"
 }
 
 function connect(options: LiveViewOptions) {
-  // only connect if there is a live view on the page
-  if (document.getElementById("live-view-container") === null) {
+  const container = document.getElementById("live-view-container")
+  if (container === null) {
     return
   }
 
+  const preference = detectTransportPreference()
+
+  if (preference === "sse") {
+    // SSE only — skip WebSocket entirely
+    connectSse(options)
+  } else if (preference === "websocket") {
+    // WebSocket only — no fallback
+    connectWs(options, () => {
+      // WebSocket failed and no fallback is allowed; retry after delay
+      setTimeout(() => connect(options), 1000)
+    })
+  } else {
+    // Auto: try WebSocket first, fall back to SSE
+    connectWs(options, () => {
+      connectSse(options)
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket transport
+// ---------------------------------------------------------------------------
+
+function connectWs(options: LiveViewOptions, onFallback: () => void) {
   var proto: string
   if (location.protocol.indexOf("https") === -1) {
     proto = "ws"
@@ -40,22 +95,202 @@ function connect(options: LiveViewOptions) {
     proto = "wss"
   }
 
-  const socket = new WebSocket(`${proto}://${window.location.host}${window.location.pathname}`);
-
+  const url = `${proto}://${window.location.host}${window.location.pathname}`
+  const socket = new WebSocket(url)
   var state: State = {}
+  var fallbackCalled = false
 
   socket.addEventListener("open", () => {
-    onOpen(socket, options)
+    // WebSocket connected successfully
+    const container = document.getElementById("live-view-container")
+    if (container) {
+      container.setAttribute("data-lv-connected", "true")
+    }
+
+    const transport: Transport = {
+      send(msg: MessageToView): void {
+        socket.send(JSON.stringify(msg))
+      },
+      disconnect(): void {
+        socket.close()
+      }
+    }
+
+    // Heartbeat
+    setInterval(() => {
+      const msg: MessageToView = { t: "h" }
+      if (options.debug) {
+        console.time(pingTimeLabel)
+      }
+      transport.send(msg)
+    }, 30 * 1000)
+
+    // Bind initial events
+    bindInitialEvents(transport, options)
   })
 
   socket.addEventListener("message", (event) => {
-    onMessage(socket, event, state, options)
+    const msg: MessageFromView = JSON.parse(event.data)
+    handleServerMessage(null, msg, state, options)
   })
 
   socket.addEventListener("close", () => {
-    onClose(options)
+    const container = document.getElementById("live-view-container")
+    if (container) {
+      container.removeAttribute("data-lv-connected")
+    }
+    if (!fallbackCalled) {
+      fallbackCalled = true
+      // WS failed at connection time — fall back to SSE
+      onFallback()
+    } else {
+      // Reconnection after a successful session — retry WS
+      setTimeout(() => {
+        connect(options)
+      }, 1000)
+    }
+  })
+
+  socket.addEventListener("error", () => {
+    if (!fallbackCalled && socket.readyState === WebSocket.CLOSED) {
+      fallbackCalled = true
+      onFallback()
+    }
   })
 }
+
+// ---------------------------------------------------------------------------
+// SSE transport (fallback)
+// ---------------------------------------------------------------------------
+
+var sseHeartbeatInterval: number | null = null
+
+function connectSse(options: LiveViewOptions) {
+  const url = `${window.location.pathname}`
+  const eventSource = new EventSource(url)
+  var state: State = {}
+  var transport: Transport | null = null
+
+  eventSource.addEventListener("message", (event) => {
+    const msg: MessageFromView = JSON.parse(event.data)
+
+    // First message from SSE contains the connection ID
+    if (msg.t === "i" && "id" in msg) {
+      state.sseId = (msg as any).id
+      transport = createSseTransport(state.sseId!)
+
+      // Mark the container as connected so tests can wait for it
+      const container = document.getElementById("live-view-container")
+      if (container) {
+        container.setAttribute("data-lv-connected", "true")
+      }
+
+      // Clear old heartbeat interval and start a new one
+      if (sseHeartbeatInterval !== null) {
+        clearInterval(sseHeartbeatInterval)
+      }
+      sseHeartbeatInterval = setInterval(() => {
+        if (options.debug) {
+          console.time(pingTimeLabel)
+        }
+        sendSseEvent(state.sseId!, { t: "h" })
+      }, 30 * 1000)
+    }
+
+    handleServerMessage(transport, msg, state, options)
+  })
+
+  eventSource.addEventListener("error", () => {
+    eventSource.close()
+    // Remove connected marker
+    const container = document.getElementById("live-view-container")
+    if (container) {
+      container.removeAttribute("data-lv-connected")
+    }
+    // Clear heartbeat to avoid stale POSTs with old connection ID
+    if (sseHeartbeatInterval !== null) {
+      clearInterval(sseHeartbeatInterval)
+      sseHeartbeatInterval = null
+    }
+    // Reconnect after a delay
+    setTimeout(() => {
+      connect(options)
+    }, 1000)
+  })
+}
+
+function createSseTransport(sseId: string): Transport {
+  return {
+    send(msg: MessageToView): void {
+      sendSseEvent(sseId, msg)
+    },
+    disconnect(): void {
+      // EventSource auto-disconnects
+    }
+  }
+}
+
+function sendSseEvent(sseId: string, msg: MessageToView): void {
+  fetch(window.location.pathname, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-live-view-event": "true",
+      "x-live-view-id": sseId,
+    },
+    body: JSON.stringify(msg),
+  }).catch((err) => {
+    console.error("Failed to send SSE event:", err)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Shared server message handling
+// ---------------------------------------------------------------------------
+
+const pingTimeLabel = "ping"
+
+function handleServerMessage(
+  transport: Transport | null,
+  msg: MessageFromView,
+  state: State,
+  options: LiveViewOptions,
+) {
+  if (msg.t === "i") {
+    state.viewState = msg.d
+    // DOM is already populated from the initial HTTP response,
+    // so we only need to bind event listeners (no morph needed).
+    if (transport) {
+      bindInitialEvents(transport, options)
+    }
+
+  } else if (msg.t === "r") {
+    if (!state.viewState) { return }
+    if (!msg.d) { return }
+    patchTemplate(state.viewState, msg.d)
+    if (transport) {
+      updateDomFromState(transport, state, options)
+    }
+
+  } else if (msg.t === "j") {
+    for (const jsCommand of msg.d) {
+      handleJsCommand(jsCommand)
+    }
+
+  } else if (msg.t === "h") {
+    // do nothing...
+    if (options.debug) {
+      console.timeEnd(pingTimeLabel)
+    }
+
+  } else {
+    const _: never = msg
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Message types
+// ---------------------------------------------------------------------------
 
 type MessageFromView = InitialRender | Render | JsCommands | HealthPong
 
@@ -94,6 +329,7 @@ interface TemplateDiffLoop {
 type InitialRender = {
   t: "i",
   d: Template,
+  id?: string,
 }
 
 type Render = {
@@ -107,357 +343,6 @@ type JsCommands = {
 }
 
 type HealthPong = { t: "h" }
-
-const pingTimeLabel = "ping"
-
-function socketSend(
-  socket: WebSocket,
-  msg: MessageToView,
-  options: LiveViewOptions,
-) {
-  socket.send(JSON.stringify(msg))
-}
-
-function onOpen(
-  socket: WebSocket,
-  options: LiveViewOptions,
-) {
-  setInterval(() => {
-    const msg: MessageToView = { t: "h" }
-    if (options.debug) {
-      console.time(pingTimeLabel)
-    }
-    socketSend(socket, msg, options)
-  }, 30 * 1000)
-}
-
-function onMessage(
-  socket: WebSocket,
-  event: MessageEvent,
-  state: State,
-  options: LiveViewOptions,
-) {
-  const msg: MessageFromView = JSON.parse(event.data)
-
-  if (msg.t === "i") {
-    state.viewState = msg.d
-    // DOM is already populated from the initial HTTP response,
-    // so we only need to bind event listeners (no morph needed).
-    bindInitialEvents(socket, options)
-
-  } else if (msg.t === "r") {
-    if (!state.viewState) { return }
-    if (!msg.d) { return }
-    patchTemplate(state.viewState, msg.d)
-    updateDomFromState(socket, state, options)
-
-  } else if (msg.t === "j") {
-    for (const jsCommand of msg.d) {
-      handleJsCommand(jsCommand)
-    }
-
-  } else if (msg.t === "h") {
-    // do nothing...
-    if (options.debug) {
-      console.timeEnd(pingTimeLabel)
-    }
-
-  } else {
-    const _: never = msg
-  }
-}
-
-function onClose(options: LiveViewOptions) {
-  setTimeout(() => {
-    connect(options)
-  }, 1000)
-}
-
-const axm = {
-  click: "axm-click",
-  input: "axm-input",
-  change: "axm-change",
-  submit: "axm-submit",
-  focus: "axm-focus",
-  blur: "axm-blur",
-  keydown: "axm-keydown",
-  keyup: "axm-keyup",
-  mouseenter: "axm-mouseenter",
-  mouseover: "axm-mouseover",
-  mouseleave: "axm-mouseleave",
-  mouseout: "axm-mouseout",
-  mousemove: "axm-mousemove",
-}
-
-const axm_window = {
-  keydown: "axm-window-keydown",
-  keyup: "axm-window-keyup",
-  focus: "axm-window-focus",
-  blur: "axm-window-blur",
-  scroll: "axm-scroll",
-}
-
-function bindInitialEvents(socket: WebSocket, options: LiveViewOptions) {
-  const attrs = Object.values(axm).map((attr) => `[${attr}]`).join(", ")
-
-  document.querySelectorAll(attrs).forEach((element) => {
-    addEventListeners(socket, element, options)
-  })
-}
-
-function addEventListeners(
-  socket: WebSocket,
-  element: Element,
-  options: LiveViewOptions,
-) {
-  if (element.hasAttribute(axm.click)) {
-    on(socket, options, element, element, "click", axm.click, (msg) => ({ t: "click", m: msg }))
-  }
-
-  if (
-    element instanceof HTMLInputElement ||
-      element instanceof HTMLTextAreaElement ||
-      element instanceof HTMLSelectElement
-  ) {
-    if (element.hasAttribute(axm.input)) {
-      on(socket, options, element, element, "input", axm.input, (msg) => {
-        const value = inputValue(element)
-        return { t: "input", m: msg, d: { v: value } }
-      })
-    }
-
-    if (element.hasAttribute(axm.change)) {
-      on(socket, options, element, element, "change", axm.change, (msg) => {
-        const value = inputValue(element)
-        return { t: "input", m: msg, d: { v: value } }
-      })
-    }
-
-    if (element.hasAttribute(axm.focus)) {
-      on(socket, options, element, element, "focus", axm.focus, (msg) => {
-        const value = inputValue(element)
-        return { t: "input", m: msg, d: { v: value } }
-      })
-    }
-
-    if (element.hasAttribute(axm.blur)) {
-      on(socket, options, element, element, "blur", axm.blur, (msg) => {
-        const value = inputValue(element)
-        return { t: "input", m: msg, d: { v: value } }
-      })
-    }
-  }
-
-  if (element instanceof HTMLFormElement) {
-    if (element.hasAttribute(axm.change)) {
-      on(socket, options, element, element, "change", axm.change, (msg) => {
-        // workaround for https://github.com/microsoft/TypeScript/issues/30584
-        const form = new FormData(element) as any
-        const query = new URLSearchParams(form).toString()
-        return { t: "form", m: msg, d: { q: query } }
-      })
-    }
-
-    if (element.hasAttribute(axm.submit)) {
-      on(socket, options, element, element, "submit", axm.submit, (msg) => {
-        // workaround for https://github.com/microsoft/TypeScript/issues/30584
-        const form = new FormData(element) as any
-        const query = new URLSearchParams(form).toString()
-        return { t: "form", m: msg, d: { q: query } }
-      })
-    }
-  }
-
-  [
-    ["mouseenter", axm.mouseenter],
-    ["mouseover", axm.mouseover],
-    ["mouseleave", axm.mouseleave],
-    ["mouseout", axm.mouseout],
-    ["mousemove", axm.mousemove],
-  ].forEach(([event, axm]) => {
-    if (!event) { return }
-    if (!axm) { return }
-
-    if (element.hasAttribute(axm)) {
-      on(socket, options, element, element, event, axm, (msg, event) => {
-        if (event instanceof MouseEvent) {
-          const data: MouseData = {
-            cx: event.clientX,
-            cy: event.clientY,
-            px: event.pageX,
-            py: event.pageY,
-            ox: event.offsetX,
-            oy: event.offsetY,
-            mx: event.movementX,
-            my: event.movementY,
-            sx: event.screenX,
-            sy: event.screenY,
-          }
-          return { t: "mouse", m: msg, d: data }
-        } else {
-          return
-        }
-      })
-    }
-  });
-
-  [
-    ["keydown", axm.keydown],
-    ["keyup", axm.keyup],
-  ].forEach(([event, axm]) => {
-    if (!event) { return }
-    if (!axm) { return }
-
-    if (element.hasAttribute(axm)) {
-      on(socket, options, element, element, event, axm, (msg, event) => {
-        if (event instanceof KeyboardEvent) {
-          if (
-            element.hasAttribute("axm-key") &&
-            element?.getAttribute("axm-key")?.toLowerCase() !== event.key.toLowerCase()
-          ) {
-            return;
-          }
-
-          const data: KeyData = {
-            k: event.key,
-            kc: event.code,
-            a: event.altKey,
-            c: event.ctrlKey,
-            s: event.shiftKey,
-            me: event.metaKey,
-          }
-          return { t: "key", m: msg, d: data }
-        } else {
-          return
-        }
-      })
-    }
-  });
-
-}
-
-function addDocumentEventListeners(
-  socket: WebSocket,
-  element: Element,
-  options: LiveViewOptions,
-) {
-  [
-    ["keydown", axm_window.keydown],
-    ["keyup", axm_window.keyup],
-  ].forEach(([event, axm]) => {
-    if (!event) { return }
-    if (!axm) { return }
-
-    if (element.hasAttribute(axm)) {
-      on(socket, options, element, document, event, axm, (msg, event) => {
-        if (event instanceof KeyboardEvent) {
-          if (
-            element.hasAttribute("axm-key") &&
-            element?.getAttribute("axm-key")?.toLowerCase() !== event.key.toLowerCase()
-          ) {
-            return;
-          }
-
-          const data: KeyData = {
-            k: event.key,
-            kc: event.code,
-            a: event.altKey,
-            c: event.ctrlKey,
-            s: event.shiftKey,
-            me: event.metaKey,
-          }
-          return { t: "key", m: msg, d: data }
-        } else {
-          return
-        }
-      })
-    }
-  });
-
-  if (element.hasAttribute(axm_window.focus)) {
-    on(socket, options, element, document, "focus", axm_window.focus, (msg) => {
-      return { t: "window_focus", m: msg }
-    })
-  }
-
-  if (element.hasAttribute(axm_window.blur)) {
-    on(socket, options, element, document, "blur", axm_window.blur, (msg) => {
-      return { t: "window_blur", m: msg }
-    })
-  }
-
-  if (element.hasAttribute(axm_window.scroll)) {
-    on(socket, options, element, document, "scroll", axm_window.scroll, (msg) => {
-      const data = {
-        sx: window.scrollX,
-        sy: window.scrollY,
-      }
-      return { t: "scroll", m: msg, d: data }
-    })
-  }
-}
-
-function on(
-  socket: WebSocket,
-  options: LiveViewOptions,
-  element: Element,
-  listenForEventOn: Element | typeof document,
-  eventName: string,
-  attr: string,
-  f: (msg: string | JSON, event: Event) => MessageToView | undefined,
-) {
-  var callback: (event: Event) => void = delayOrThrottle(element, (event: Event) => {
-    if (!(event instanceof KeyboardEvent)) {
-      event.preventDefault()
-    }
-
-    const decodeMsg = msgAttr(element, attr)
-    if (!decodeMsg) { return }
-    const payload = f(decodeMsg, event)
-    if (!payload) { return }
-    socketSend(socket, payload, options)
-  })
-
-  if (document === listenForEventOn) {
-    documentEventListeners.push({
-      event: eventName,
-      callback: callback,
-    })
-  }
-
-  listenForEventOn.addEventListener(eventName, callback)
-}
-
-function msgAttr(element: Element, attr: string): string | JSON | undefined {
-    const value = element.getAttribute(attr)
-    if (!value) { return }
-    try {
-      return JSON.parse(value)
-    } catch {
-      return value
-    }
-}
-
-function delayOrThrottle<In extends unknown[]>(element: Element, f: Fn<In>): Fn<In> {
-  var delayMs = numberAttr(element, "axm-debounce")
-  if (delayMs) {
-    return debounce(f, delayMs)
-  }
-
-  var delayMs = numberAttr(element, "axm-throttle")
-  if (delayMs) {
-    return throttle(f, delayMs)
-  }
-
-  return f
-}
-
-interface DocumentEventListener {
-  event: string,
-  callback: (event: Event) => void,
-}
-
-var documentEventListeners: DocumentEventListener[] = []
 
 type MessageToView =
   Click
@@ -538,6 +423,294 @@ interface MouseData {
 
 type InputValue = string | string[] | boolean
 
+// ---------------------------------------------------------------------------
+// Event bindings
+// ---------------------------------------------------------------------------
+
+const axm = {
+  click: "axm-click",
+  input: "axm-input",
+  change: "axm-change",
+  submit: "axm-submit",
+  focus: "axm-focus",
+  blur: "axm-blur",
+  keydown: "axm-keydown",
+  keyup: "axm-keyup",
+  mouseenter: "axm-mouseenter",
+  mouseover: "axm-mouseover",
+  mouseleave: "axm-mouseleave",
+  mouseout: "axm-mouseout",
+  mousemove: "axm-mousemove",
+}
+
+const axm_window = {
+  keydown: "axm-window-keydown",
+  keyup: "axm-window-keyup",
+  focus: "axm-window-focus",
+  blur: "axm-window-blur",
+  scroll: "axm-scroll",
+}
+
+function bindInitialEvents(transport: Transport, options: LiveViewOptions) {
+  const attrs = Object.values(axm).map((attr) => `[${attr}]`).join(", ")
+
+  document.querySelectorAll(attrs).forEach((element) => {
+    addEventListeners(transport, element, options)
+  })
+}
+
+function addEventListeners(
+  transport: Transport,
+  element: Element,
+  options: LiveViewOptions,
+) {
+  if (element.hasAttribute(axm.click)) {
+    on(transport, options, element, element, "click", axm.click, (msg) => ({ t: "click", m: msg }))
+  }
+
+  if (
+    element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+  ) {
+    if (element.hasAttribute(axm.input)) {
+      on(transport, options, element, element, "input", axm.input, (msg) => {
+        const value = inputValue(element)
+        return { t: "input", m: msg, d: { v: value } }
+      })
+    }
+
+    if (element.hasAttribute(axm.change)) {
+      on(transport, options, element, element, "change", axm.change, (msg) => {
+        const value = inputValue(element)
+        return { t: "input", m: msg, d: { v: value } }
+      })
+    }
+
+    if (element.hasAttribute(axm.focus)) {
+      on(transport, options, element, element, "focus", axm.focus, (msg) => {
+        const value = inputValue(element)
+        return { t: "input", m: msg, d: { v: value } }
+      })
+    }
+
+    if (element.hasAttribute(axm.blur)) {
+      on(transport, options, element, element, "blur", axm.blur, (msg) => {
+        const value = inputValue(element)
+        return { t: "input", m: msg, d: { v: value } }
+      })
+    }
+  }
+
+  if (element instanceof HTMLFormElement) {
+    if (element.hasAttribute(axm.change)) {
+      on(transport, options, element, element, "change", axm.change, (msg) => {
+        const form = new FormData(element) as any
+        const query = new URLSearchParams(form).toString()
+        return { t: "form", m: msg, d: { q: query } }
+      })
+    }
+
+    if (element.hasAttribute(axm.submit)) {
+      on(transport, options, element, element, "submit", axm.submit, (msg) => {
+        const form = new FormData(element) as any
+        const query = new URLSearchParams(form).toString()
+        return { t: "form", m: msg, d: { q: query } }
+      })
+    }
+  }
+
+  [
+    ["mouseenter", axm.mouseenter],
+    ["mouseover", axm.mouseover],
+    ["mouseleave", axm.mouseleave],
+    ["mouseout", axm.mouseout],
+    ["mousemove", axm.mousemove],
+  ].forEach(([event, axm]) => {
+    if (!event) { return }
+    if (!axm) { return }
+
+    if (element.hasAttribute(axm)) {
+      on(transport, options, element, element, event, axm, (msg, event) => {
+        if (event instanceof MouseEvent) {
+          const data: MouseData = {
+            cx: event.clientX,
+            cy: event.clientY,
+            px: event.pageX,
+            py: event.pageY,
+            ox: event.offsetX,
+            oy: event.offsetY,
+            mx: event.movementX,
+            my: event.movementY,
+            sx: event.screenX,
+            sy: event.screenY,
+          }
+          return { t: "mouse", m: msg, d: data }
+        } else {
+          return
+        }
+      })
+    }
+  });
+
+  [
+    ["keydown", axm.keydown],
+    ["keyup", axm.keyup],
+  ].forEach(([event, axm]) => {
+    if (!event) { return }
+    if (!axm) { return }
+
+    if (element.hasAttribute(axm)) {
+      on(transport, options, element, element, event, axm, (msg, event) => {
+        if (event instanceof KeyboardEvent) {
+          if (
+            element.hasAttribute("axm-key") &&
+            element?.getAttribute("axm-key")?.toLowerCase() !== event.key.toLowerCase()
+          ) {
+            return;
+          }
+
+          const data: KeyData = {
+            k: event.key,
+            kc: event.code,
+            a: event.altKey,
+            c: event.ctrlKey,
+            s: event.shiftKey,
+            me: event.metaKey,
+          }
+          return { t: "key", m: msg, d: data }
+        } else {
+          return
+        }
+      })
+    }
+  });
+
+}
+
+function addDocumentEventListeners(
+  transport: Transport,
+  element: Element,
+  options: LiveViewOptions,
+) {
+  [
+    ["keydown", axm_window.keydown],
+    ["keyup", axm_window.keyup],
+  ].forEach(([event, axm]) => {
+    if (!event) { return }
+    if (!axm) { return }
+
+    if (element.hasAttribute(axm)) {
+      on(transport, options, element, document, event, axm, (msg, event) => {
+        if (event instanceof KeyboardEvent) {
+          if (
+            element.hasAttribute("axm-key") &&
+            element?.getAttribute("axm-key")?.toLowerCase() !== event.key.toLowerCase()
+          ) {
+            return;
+          }
+
+          const data: KeyData = {
+            k: event.key,
+            kc: event.code,
+            a: event.altKey,
+            c: event.ctrlKey,
+            s: event.shiftKey,
+            me: event.metaKey,
+          }
+          return { t: "key", m: msg, d: data }
+        } else {
+          return
+        }
+      })
+    }
+  });
+
+  if (element.hasAttribute(axm_window.focus)) {
+    on(transport, options, element, document, "focus", axm_window.focus, (msg) => {
+      return { t: "window_focus", m: msg }
+    })
+  }
+
+  if (element.hasAttribute(axm_window.blur)) {
+    on(transport, options, element, document, "blur", axm_window.blur, (msg) => {
+      return { t: "window_blur", m: msg }
+    })
+  }
+
+  if (element.hasAttribute(axm_window.scroll)) {
+    on(transport, options, element, document, "scroll", axm_window.scroll, (msg) => {
+      const data = {
+        sx: window.scrollX,
+        sy: window.scrollY,
+      }
+      return { t: "scroll", m: msg, d: data }
+    })
+  }
+}
+
+function on(
+  transport: Transport,
+  options: LiveViewOptions,
+  element: Element,
+  listenForEventOn: Element | typeof document,
+  eventName: string,
+  attr: string,
+  f: (msg: string | JSON, event: Event) => MessageToView | undefined,
+) {
+  var callback: (event: Event) => void = delayOrThrottle(element, (event: Event) => {
+    if (!(event instanceof KeyboardEvent)) {
+      event.preventDefault()
+    }
+
+    const decodeMsg = msgAttr(element, attr)
+    if (!decodeMsg) { return }
+    const payload = f(decodeMsg, event)
+    if (!payload) { return }
+    transport.send(payload)
+  })
+
+  if (document === listenForEventOn) {
+    documentEventListeners.push({
+      event: eventName,
+      callback: callback,
+    })
+  }
+
+  listenForEventOn.addEventListener(eventName, callback)
+}
+
+function msgAttr(element: Element, attr: string): string | JSON | undefined {
+    const value = element.getAttribute(attr)
+    if (!value) { return }
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value
+    }
+}
+
+function delayOrThrottle<In extends unknown[]>(element: Element, f: Fn<In>): Fn<In> {
+  var delayMs = numberAttr(element, "axm-debounce")
+  if (delayMs) {
+    return debounce(f, delayMs)
+  }
+
+  var delayMs = numberAttr(element, "axm-throttle")
+  if (delayMs) {
+    return throttle(f, delayMs)
+  }
+
+  return f
+}
+
+interface DocumentEventListener {
+  event: string,
+  callback: (event: Event) => void,
+}
+
+var documentEventListeners: DocumentEventListener[] = []
+
 function inputValue(element: Element): InputValue {
   if (element instanceof HTMLTextAreaElement) {
     return element.value
@@ -572,12 +745,12 @@ function numberAttr(element: Element, attr: string): number | null {
   return null
 }
 
-function updateDomFromState(socket: WebSocket, state: State, options: LiveViewOptions) {
+function updateDomFromState(transport: Transport, state: State, options: LiveViewOptions) {
   if (!state.viewState) { return }
   const html = buildHtml(state.viewState)
   const container = document.querySelector("#live-view-container")
   if (!container) { return }
-  patchDom(socket, container, html)
+  patchDom(transport, container, html)
 
   function buildHtml(template: Template): string {
     var combined = ""
@@ -602,7 +775,6 @@ function updateDomFromState(socket: WebSocket, state: State, options: LiveViewOp
       } else if ("b" in templateDyn) {
         const fixed = templateDyn.f
 
-        // TODO: make sure we loop over the entries in order here
         Object.values(templateDyn.b).forEach((value) => {
           const nestedTemplate = { f: fixed, d: value }
           combined = combined.concat(buildHtml(nestedTemplate))
@@ -616,7 +788,7 @@ function updateDomFromState(socket: WebSocket, state: State, options: LiveViewOp
     return combined
   }
 
-  function patchDom(socket: WebSocket, element: Element, html: string) {
+  function patchDom(transport: Transport, element: Element, html: string) {
     for (var i = 0; i < documentEventListeners.length; i++) {
       let e = documentEventListeners[i]
       if (!e) { continue }
@@ -627,40 +799,15 @@ function updateDomFromState(socket: WebSocket, state: State, options: LiveViewOp
     morphdom(element, html, {
       onNodeAdded: (node) => {
         if (node instanceof Element) {
-          addEventListeners(socket, node, options)
+          addEventListeners(transport, node, options)
         }
         return node
       },
-      // onBeforeElUpdated: (fromEl, toEl) => {
-        // if (fromEl instanceof HTMLInputElement && toEl instanceof HTMLInputElement) {
-        //   if (toEl.getAttribute("type") === "radio" || toEl.getAttribute("type") === "checkbox") {
-        //     toEl.checked = fromEl.checked;
-        //   } else {
-        //     toEl.value = fromEl.value;
-        //   }
-        // }
-
-        // if (fromEl instanceof HTMLTextAreaElement && toEl instanceof HTMLTextAreaElement) {
-        //   toEl.value = fromEl.value;
-        // }
-
-        // if (fromEl instanceof HTMLOptionElement && toEl instanceof HTMLOptionElement) {
-        //   if (toEl.closest("select")?.hasAttribute("multiple")) {
-        //     toEl.selected = fromEl.selected
-        //   }
-        // }
-
-        // if (fromEl instanceof HTMLSelectElement && toEl instanceof HTMLSelectElement && !toEl.hasAttribute("multiple")) {
-        //   toEl.value = fromEl.value
-        // }
-
-      //   return true
-      // },
     })
 
     const attrs = Object.values(axm_window).map((attr) => `[${attr}]`).join(", ")
     document.querySelectorAll(attrs).forEach((el) => {
-      addDocumentEventListeners(socket, el, options)
+      addDocumentEventListeners(transport, el, options)
     })
   }
 }
@@ -688,8 +835,6 @@ function patchTemplate(template: Template, diff: TemplateDiff) {
       } else if (typeof diffVal === "object") {
         const current = template[key]
         if (current === undefined) {
-          // New entry that didn't exist before (e.g., after a previous delete).
-          // Create it from the diff.
           if ("d" in diffVal) {
             template[key] = <TemplateDynamic>diffVal
           } else if ("b" in diffVal) {
@@ -777,6 +922,10 @@ function patchTemplate(template: Template, diff: TemplateDiff) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// JavaScript commands
+// ---------------------------------------------------------------------------
+
 interface JsCommand {
   delay_ms: number | null,
   kind: JsCommandKind,
@@ -844,6 +993,10 @@ function handleJsCommand(cmd: JsCommand) {
     run()
   }
 }
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
 type Fn<
   In extends unknown[],

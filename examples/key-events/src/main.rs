@@ -1,18 +1,31 @@
-use axum::{response::IntoResponse, routing::get, Router};
+use axum::{Extension, Router};
 use axum_live_view::{
-    event_data::EventData, html, live_view::Updated, Html, LiveView, LiveViewUpgrade,
+    sse::LiveViewSseState,
+    event_data::EventData, html, live_view::Updated, page, Html, LiveView, 
 };
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, net::SocketAddr};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    let sse = Arc::new(LiveViewSseState::new());
 
     let app = Router::new()
-        .route("/", get(root))
-        .route("/bundle.js", axum_live_view::precompiled_js());
+        .merge(page::live_view_page("/", |embed| {
+            html! {
+                <!DOCTYPE html>
+                <html>
+                    <head></head>
+                    <body>
+                        { embed.embed(View::default()) }
+                        <script src="/bundle.js"></script>
+                    </body>
+                </html>
+            }
+        }))
+        .route("/bundle.js", axum_live_view::precompiled_js())
+        .layer(Extension(sse));
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -21,24 +34,6 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
-}
-
-async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
-    let view = View::default();
-
-    live.response(move |embed| {
-        html! {
-            <!DOCTYPE html>
-            <html>
-                <head>
-                </head>
-                <body>
-                    { embed.embed(view) }
-                    <script src="/bundle.js"></script>
-                </body>
-            </html>
-        }
-    })
 }
 
 #[derive(Default, Clone)]

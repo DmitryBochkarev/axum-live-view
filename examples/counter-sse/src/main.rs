@@ -1,7 +1,15 @@
+//! Counter example using `page::live_view_page`.
+//!
+//! All transport modes (HTML, WebSocket, SSE) are served from the same route.
+//! Run with:
+//! ```sh
+//! cargo run -p example-counter-sse
+//! ```
+
 use axum::{Extension, Router};
 use axum_live_view::{
-    event_data::EventData, html, live_view::Updated, page,
-    sse::LiveViewSseState, Html, LiveView,
+    event_data::EventData, html, live_view::Updated,
+    page, sse::LiveViewSseState, Html, LiveView,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc};
@@ -9,6 +17,8 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let sse = Arc::new(LiveViewSseState::new());
 
     let app = Router::new()
@@ -16,7 +26,9 @@ async fn main() {
             html! {
                 <!DOCTYPE html>
                 <html>
-                    <head></head>
+                    <head>
+                        <meta name="live-view-transport" content="sse"></meta>
+                    </head>
                     <body>
                         { embed.embed(Counter::default()) }
                         <script src="/bundle.js"></script>
@@ -33,6 +45,7 @@ async fn main() {
         .unwrap_or(3000);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
+    println!("listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -59,11 +72,10 @@ impl LiveView for Counter {
     fn render(&self) -> Html<Self::Message> {
         html! {
             <div>
-                <button axm-click={ Msg::Incr }>"+"</button>
-                <button axm-click={ Msg::Decr }>"-"</button>
+                <button axm-click={ Msg::Incr } class="incr-btn">"+"</button>
+                <button axm-click={ Msg::Decr } class="decr-btn">"-"</button>
             </div>
-            <div>
-                "Counter value: "
+            <div class="counter-value">
                 { self.count }
             </div>
         }

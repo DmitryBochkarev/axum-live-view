@@ -268,6 +268,8 @@ pub mod event_data;
 pub mod extract;
 pub mod js_command;
 pub mod live_view;
+pub mod page;
+pub mod sse;
 pub mod test;
 
 mod html;
@@ -275,7 +277,11 @@ mod life_cycle;
 mod util;
 
 #[doc(inline)]
-pub use self::{extract::LiveViewUpgrade, html::Html, live_view::LiveView};
+pub use self::{
+    extract::LiveViewUpgrade,
+    html::Html,
+    live_view::LiveView,
+};
 
 #[doc = include_str!("docs/html.md")]
 pub use axum_live_view_macros::html;
