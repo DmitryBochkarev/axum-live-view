@@ -3,7 +3,8 @@ import { spawn, ChildProcess } from "child_process";
 import path from "path";
 import http from "http";
 
-const TODO_SERVER_URL = `http://localhost:3000`;
+const TODO_PORT = "3001";
+const TODO_SERVER_URL = `http://localhost:${TODO_PORT}`;
 
 let serverProcess: ChildProcess | null = null;
 
@@ -14,6 +15,7 @@ test.beforeAll(async () => {
     [],
     {
       stdio: "inherit",
+      env: { ...process.env, PORT: TODO_PORT },
     }
   );
 
