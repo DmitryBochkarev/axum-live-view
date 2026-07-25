@@ -33,7 +33,7 @@ async fn main() {
         Router::new()
             .route("/", get(root))
             .route("/observe", get(observe))
-            .route("/bundle.js", axum_live_view::precompiled_js())
+
             .route("/xp.css", get(xp_css))
             .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
             .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
@@ -109,7 +109,7 @@ async fn root(
                             { embed.embed(view) }
                         </div>
                     </div>
-                    <script src="/bundle.js"></script>
+                    <script src="/_live_view.js"></script>
                 </body>
             </html>
         }
@@ -148,7 +148,7 @@ async fn observe(
                             { embed.embed(view) }
                         </div>
                     </div>
-                    <script src="/bundle.js"></script>
+                    <script src="/_live_view.js"></script>
                 </body>
             </html>
         }

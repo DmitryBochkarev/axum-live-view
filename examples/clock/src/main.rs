@@ -12,7 +12,7 @@ async fn main() {
     let app = axum_live_view::setup(
         Router::new()
             .route("/", get(root))
-            .route("/bundle.js", axum_live_view::precompiled_js())
+
     );
 
     let port: u16 = std::env::var("PORT")
@@ -38,7 +38,7 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                 </head>
                 <body>
                     { embed.embed(view) }
-                    <script src="/bundle.js"></script>
+                    <script src="/_live_view.js"></script>
                 </body>
             </html>
         }

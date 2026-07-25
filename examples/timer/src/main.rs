@@ -25,7 +25,7 @@ async fn main() {
     let app = axum_live_view::setup(
         Router::new()
             .route("/", get(root))
-            .route("/bundle.js", axum_live_view::precompiled_js())
+
             .route("/xp.css", get(xp_css))
             .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
             .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
@@ -64,7 +64,7 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                             { embed.embed(view) }
                         </div>
                     </div>
-                    <script src="/bundle.js"></script>
+                    <script src="/_live_view.js"></script>
                 </body>
             </html>
         }

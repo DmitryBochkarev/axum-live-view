@@ -17,14 +17,10 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     // Build the router and enable SSE support via setup()
+//!     // Build the router and enable live-view support via setup()
 //!     let app = axum_live_view::setup(
 //!         Router::new()
 //!             .route("/", get(root))
-//!             // Use a precompiled and minified build of axum-live-view's JavaScript.
-//!             // This is the easiest way to get started. Integration with bundlers
-//!             // is of course also possible.
-//!             .route("/assets/live-view.js", axum_live_view::precompiled_js())
 //!     );
 //!
 //!     # async {
@@ -70,8 +66,9 @@
 //!                     { embed_live_view.embed(counter) }
 //!
 //!                     // Load the JavaScript. This will automatically initialize live view
-//!                     // connections.
-//!                     <script src="/assets/live-view.js"></script>
+//!                     // connections. The /_live_view.js route is registered automatically
+//!                     // by axum_live_view::setup().
+//!                     <script src="/_live_view.js"></script>
 //!                 </body>
 //!             </html>
 //!         }
@@ -308,11 +305,13 @@ pub use axum_live_view_macros::html;
 /// For a good default route that serves just the JavaScript use [`precompiled_js`].
 ///
 /// [webpack]: https://webpack.js.org
-#[cfg(feature = "precompiled-js")]
-#[cfg_attr(docsrs, doc(cfg(feature = "precompiled-js")))]
 pub const PRECOMPILED_JS: &str = include_str!("../../assets-precompiled/axum_live_view.min.js");
 
 /// A route that returns a precompiled build of axum-live-view's JavaScript.
+///
+/// This is automatically registered at `/_live_view.js` by the [`setup`] function.
+/// Use this function directly only if you need to serve the JavaScript at a
+/// different path.
 ///
 /// This enables using axum-live-view without a bundler like [webpack].
 ///
@@ -334,13 +333,11 @@ pub const PRECOMPILED_JS: &str = include_str!("../../assets-precompiled/axum_liv
 /// use axum::Router;
 /// use axum_live_view::precompiled_js;
 ///
-/// let app = Router::new().route("/assets/live_view.js", precompiled_js());
+/// let app = Router::new().route("/custom/path/to/live_view.js", precompiled_js());
 /// # let _: Router = app;
 /// ```
 ///
 /// [webpack]: https://webpack.js.org
-#[cfg(feature = "precompiled-js")]
-#[cfg_attr(docsrs, doc(cfg(feature = "precompiled-js")))]
 #[allow(clippy::declare_interior_mutable_const)]
 pub fn precompiled_js<S>() -> axum::routing::MethodRouter<S>
 where

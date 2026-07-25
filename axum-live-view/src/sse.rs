@@ -350,9 +350,10 @@ fn broadcast_update(update_tx: &broadcast::Sender<SseServerMessage>, response: U
 // High-level setup
 // ---------------------------------------------------------------------------
 
-/// Enable live-view SSE support on a router.
+/// Enable live-view support on a router.
 ///
 /// Wraps the given router, adding:
+/// - A `/_live_view.js` GET route that serves the precompiled live-view JavaScript
 /// - A `/_sse` POST route for receiving client events over SSE
 /// - An `Extension` layer with `LiveViewSseState` so [`LiveViewUpgrade`] can
 ///   detect SSE requests
@@ -368,7 +369,6 @@ fn broadcast_update(update_tx: &broadcast::Sender<SseServerMessage>, response: U
 /// let app = axum_live_view::setup(
 ///     Router::new()
 ///         .route("/", get(root))
-///         .route("/bundle.js", axum_live_view::precompiled_js())
 /// );
 /// ```
 pub fn setup(router: axum::Router) -> axum::Router {
@@ -376,9 +376,13 @@ pub fn setup(router: axum::Router) -> axum::Router {
     use std::sync::Arc;
 
     let sse = Arc::new(LiveViewSseState::new());
-    router
+    let router = router
         .route("/_sse", axum::routing::post(event_handler))
-        .layer(Extension(sse))
+        .layer(Extension(sse));
+
+    let router = router.route("/_live_view.js", crate::precompiled_js());
+
+    router
 }
 
 // ---------------------------------------------------------------------------

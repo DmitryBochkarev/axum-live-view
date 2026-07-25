@@ -270,9 +270,6 @@ let (html, js_commands) = handle.send(msg, data).await;  // send message, get up
 - `cargo xtask codegen` — Generates `axum-live-view/src/live_view/combine.rs` (Either types + LiveView impls for 1-8 views), then runs `cargo fmt`
 - `cargo xtask test-integration` — Builds JS + todo example, runs Playwright tests
 
-### Feature flags:
-- `precompiled-js` (default): includes precompiled JS bundle via `include_str!`
-
 ### Key dependencies:
 - `axum 0.8` with `ws` feature
 - `tokio` with `sync` and `macros`

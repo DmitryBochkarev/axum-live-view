@@ -31,7 +31,7 @@ async fn main() {
     let app = axum_live_view::setup(
         Router::new()
             .route("/", get(root))
-            .route("/bundle.js", axum_live_view::precompiled_js())
+
             .layer(
                 ServiceBuilder::new()
                     .layer(Extension(messages))
@@ -86,7 +86,7 @@ async fn root(
                 </head>
                 <body>
                     { embed.embed(combined) }
-                    <script src="/bundle.js"></script>
+                    <script src="/_live_view.js"></script>
                 </body>
             </html>
         }

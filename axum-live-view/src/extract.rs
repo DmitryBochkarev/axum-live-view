@@ -133,8 +133,9 @@ impl LiveViewUpgrade {
     ///           { embed_live_view.embed(MyView::default()) }
     ///
     ///           // Load the JavaScript. This will automatically initialize live view
-    ///           // connections.
-    ///           <script src="/assets/live-view.js"></script>
+    ///           // connections. The /_live_view.js route is registered automatically
+    ///           // by axum_live_view::setup().
+    ///           <script src="/_live_view.js"></script>
     ///         }
     ///     })
     /// }

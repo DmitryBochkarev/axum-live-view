@@ -25,13 +25,11 @@ use std::convert::Infallible;
 
 #[tokio::main]
 async fn main() {
-    // A normal axum router...
-    let app = Router::new()
-        .route("/", get(root))
-        // Use a precompiled and minified build of axum-live-view's JavaScript.
-        // This is the easiest way to get started. Integration with bundlers
-        // is of course also possible.
-        .route("/assets/live-view.js", axum_live_view::precompiled_js());
+    // Build the router and enable live-view support via setup()
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+    );
 
     // ...that we run like any other axum app
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
@@ -76,8 +74,9 @@ async fn root(
                     { embed_live_view.embed(counter) }
 
                     // Load the JavaScript. This will automatically initialize live view
-                    // connections.
-                    <script src="/assets/live-view.js"></script>
+                    // connections. The /_live_view.js route is registered automatically
+                    // by axum_live_view::setup().
+                    <script src="/_live_view.js"></script>
                 </body>
             </html>
         }
