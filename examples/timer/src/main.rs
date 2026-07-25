@@ -6,7 +6,7 @@ use axum::{
 };
 use axum_live_view::{
     event_data::EventData,
-    html,
+    html, live_page,
     live_view::{Updated, ViewHandle},
     Html, LiveView, LiveViewUpgrade,
 };
@@ -24,7 +24,7 @@ async fn main() {
 
     let app = axum_live_view::setup(
         Router::new()
-            .route("/", get(root))
+            .route("/", live_page(root))
 
             .route("/xp.css", get(xp_css))
             .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))

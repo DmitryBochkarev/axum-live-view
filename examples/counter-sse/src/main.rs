@@ -1,8 +1,8 @@
 //! Counter example demonstrating SSE transport via `LiveViewUpgrade`.
 //!
 //! SSE transport requires:
-//! 1. `LiveViewSseState` in extensions
-//! 2. `sse::event_handler()` for the POST route (client → server events)
+//! 1. `LiveViewSseState` in extensions (provided by `axum_live_view::setup`)
+//! 2. Using `live_page` instead of `get` for the route (adds POST handler)
 //! 3. The JS client sends `Accept: text/event-stream` to enable SSE mode
 //!
 //! Run with:
@@ -10,9 +10,9 @@
 //! cargo run -p example-counter-sse
 //! ```
 
-use axum::{Router, response::IntoResponse, routing::get};
+use axum::{Router, response::IntoResponse};
 use axum_live_view::{
-    event_data::EventData, html, live_view::Updated,
+    event_data::EventData, html, live_page, live_view::Updated,
     LiveViewUpgrade, Html, LiveView,
 };
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,7 @@ async fn main() {
 
     let app = axum_live_view::setup(
         Router::new()
-            .route("/", get(root))
-
+            .route("/", live_page(root))
     );
 
     let port: u16 = std::env::var("PORT")

@@ -2,12 +2,11 @@ use axum::{
     extract::Extension,
     http::{HeaderMap, Uri},
     response::IntoResponse,
-    routing::get,
     Router,
 };
 use axum_live_view::{
     event_data::EventData,
-    html, js_command,
+    html, js_command, live_page,
     live_view::{self, Updated, ViewHandle},
     Html, LiveView, LiveViewUpgrade,
 };
@@ -30,7 +29,7 @@ async fn main() {
 
     let app = axum_live_view::setup(
         Router::new()
-            .route("/", get(root))
+            .route("/", live_page(root))
 
             .layer(
                 ServiceBuilder::new()

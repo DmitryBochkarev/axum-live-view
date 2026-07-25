@@ -231,7 +231,7 @@ function createSseTransport(sseId: string): Transport {
 }
 
 function sendSseEvent(sseId: string, msg: MessageToView): void {
-  fetch("/_sse", {
+  fetch(`${window.location.pathname}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

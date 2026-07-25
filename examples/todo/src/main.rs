@@ -1,6 +1,6 @@
-use axum::{Router, response::IntoResponse, routing::get};
+use axum::{Router, response::IntoResponse};
 use axum_live_view::{
-    Html, LiveView, LiveViewUpgrade, event_data::EventData, html, live_view::Updated,
+    Html, LiveView, LiveViewUpgrade, event_data::EventData, html, live_page, live_view::Updated,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -12,7 +12,7 @@ async fn main() {
 
     let app = axum_live_view::setup(
         Router::new()
-            .route("/", get(root))
+            .route("/", live_page(root))
 
     );
 

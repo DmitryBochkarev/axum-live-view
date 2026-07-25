@@ -354,35 +354,76 @@ fn broadcast_update(update_tx: &broadcast::Sender<SseServerMessage>, response: U
 ///
 /// Wraps the given router, adding:
 /// - A `/_live_view.js` GET route that serves the precompiled live-view JavaScript
-/// - A `/_sse` POST route for receiving client events over SSE
 /// - An `Extension` layer with `LiveViewSseState` so [`LiveViewUpgrade`] can
-///   detect SSE requests
+///   detect SSE requests and [`live_page`] can handle SSE events
 ///
-/// [`LiveViewUpgrade`]: crate::LiveViewUpgrade
-///
-/// # Example
+/// Use [`live_page`] instead of [`get`](axum::routing::get) for routes that
+/// should support SSE transport:
 ///
 /// ```rust,ignore
-/// use axum::{Router, routing::get};
-/// use axum_live_view::LiveViewUpgrade;
+/// use axum::Router;
+/// use axum_live_view::{live_page, LiveViewUpgrade};
 ///
 /// let app = axum_live_view::setup(
 ///     Router::new()
-///         .route("/", get(root))
+///         .route("/", live_page(root))
 /// );
 /// ```
+///
+/// [`LiveViewUpgrade`]: crate::LiveViewUpgrade
 pub fn setup(router: axum::Router) -> axum::Router {
     use axum::Extension;
     use std::sync::Arc;
 
     let sse = Arc::new(LiveViewSseState::new());
-    let router = router
-        .route("/_sse", axum::routing::post(event_handler))
-        .layer(Extension(sse));
+    let router = router.layer(Extension(sse));
 
     let router = router.route("/_live_view.js", crate::precompiled_js());
 
     router
+}
+
+// ---------------------------------------------------------------------------
+// live_page helper
+// ---------------------------------------------------------------------------
+
+/// A method router for live-view routes that support SSE transport.
+///
+/// Equivalent to `axum::routing::get(handler).post(event_handler)` — it
+/// handles:
+/// - `GET` requests: initial HTML render, WebSocket upgrade, or SSE stream
+///   opening (via [`LiveViewUpgrade`])
+/// - `POST` requests: SSE client events forwarded to the view
+///
+/// Use this instead of [`get`](axum::routing::get) for any route that hosts
+/// a live view and needs SSE fallback support. Routes using only WebSocket
+/// transport can continue to use [`get`](axum::routing::get).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use axum::Router;
+/// use axum_live_view::{live_page, LiveViewUpgrade};
+///
+/// async fn root(live: LiveViewUpgrade) -> impl axum::response::IntoResponse {
+///     // ...
+///     # axum::response::Response::new(axum::body::Body::empty())
+/// }
+///
+/// let app = axum_live_view::setup(
+///     Router::new()
+///         .route("/", live_page(root))
+/// );
+/// ```
+///
+/// [`LiveViewUpgrade`]: crate::LiveViewUpgrade
+pub fn live_page<H, T, S>(handler: H) -> axum::routing::MethodRouter<S>
+where
+    H: axum::handler::Handler<T, S>,
+    T: 'static,
+    S: Clone + Send + Sync + 'static,
+{
+    axum::routing::get(handler).post(event_handler)
 }
 
 // ---------------------------------------------------------------------------
@@ -391,12 +432,14 @@ pub fn setup(router: axum::Router) -> axum::Router {
 
 /// Axum handler for receiving SSE events from the client.
 ///
-/// The JavaScript client sends POST requests to `/_sse` with
-/// `x-live-view-event: true` and `x-live-view-id: <connection-id>` headers
-/// when WebSocket transport is unavailable.
+/// The JavaScript client sends POST requests to the same URL with
+/// `x-live-view-id: <connection-id>` headers when WebSocket transport
+/// is unavailable.
 ///
-/// This route is automatically registered by [`setup`].
-pub(crate) async fn event_handler(
+/// This handler is automatically combined with the view handler by
+/// [`live_page`]. Use [`live_page`] instead of [`get`](axum::routing::get)
+/// for routes that should support SSE transport.
+pub async fn event_handler(
     axum::Extension(sse): axum::Extension<Arc<LiveViewSseState>>,
     headers: HeaderMap,
     body: bytes::Bytes,

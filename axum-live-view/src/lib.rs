@@ -279,7 +279,7 @@ pub use self::{
     extract::LiveViewUpgrade,
     html::Html,
     live_view::LiveView,
-    sse::setup,
+    sse::{live_page, setup},
 };
 
 #[doc = include_str!("docs/html.md")]
