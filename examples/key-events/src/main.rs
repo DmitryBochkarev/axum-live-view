@@ -3,7 +3,7 @@ use axum_live_view::{
     event_data::EventData, html, live_page, live_view::Updated, Html, LiveView, LiveViewUpgrade,
 };
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, net::SocketAddr};
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 #[tokio::main]

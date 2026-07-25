@@ -10,8 +10,8 @@ use crate::{
     life_cycle::spawn_view,
     live_view::ViewHandle,
     transport::{
-        self, ConnectionHandle, ConnectionId, ConnectionRegistry, RawEvent, ServerMessage,
-        forward_to_broadcast, new_connection_id, process_client_event,
+        ConnectionId, ConnectionRegistry, RawEvent, ServerMessage,
+        forward_to_broadcast, process_client_event,
     },
     util::ReceiverStream,
     LiveView,
@@ -22,7 +22,6 @@ use axum::{
 };
 use futures_util::stream::Stream;
 use pin_project_lite::pin_project;
-use serde::Serialize;
 use serde_json::Value;
 use std::{
     convert::Infallible,
@@ -187,9 +186,7 @@ pub fn setup(router: axum::Router) -> axum::Router {
         .layer(Extension(registry))
         .layer(Extension(lp_connections));
 
-    let router = router.route("/_live_view.js", crate::precompiled_js());
-
-    router
+    router.route("/_live_view.js", crate::precompiled_js())
 }
 
 // ---------------------------------------------------------------------------

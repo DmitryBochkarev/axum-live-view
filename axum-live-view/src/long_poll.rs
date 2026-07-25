@@ -28,8 +28,6 @@ use crate::{
 };
 use axum::{
     http::{HeaderMap, Uri},
-    response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 use std::{
@@ -207,6 +205,7 @@ where
     conn_id
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_long_poll_view_task<L>(
     view: L,
     uri: Uri,

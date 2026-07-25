@@ -7,7 +7,7 @@
 use crate::{
     event_data::EventData,
     life_cycle::{
-        spawn_view, EventMessageFromSocketData, UpdateResponse, ViewRequestError, ViewTaskHandle,
+        EventMessageFromSocketData, UpdateResponse, ViewRequestError, ViewTaskHandle,
     },
     live_view::ViewHandle,
     LiveView,
@@ -106,6 +106,7 @@ impl Default for ConnectionRegistry {
 #[derive(Clone, Debug)]
 pub(crate) struct ConnectionHandle {
     pub(crate) event_tx: mpsc::Sender<RawEvent>,
+    #[allow(dead_code)]
     pub(crate) update_tx: broadcast::Sender<ServerMessage>,
 }
 
@@ -274,12 +275,13 @@ pub(crate) fn forward_to_push(
 /// Mount a live view and render its initial state, sending the result
 /// as an `InitialRender` message. Returns `Err(())` if mounting or
 /// rendering fails, in which case the caller should clean up.
+#[allow(dead_code)]
 pub(crate) async fn mount_and_render<L>(
     view_task: &ViewTaskHandle<L::Message>,
     view_handle: ViewHandle<L::Message>,
     uri: Uri,
     headers: HeaderMap,
-    connection_id: &ConnectionId,
+    _connection_id: &ConnectionId,
 ) -> Result<Value, ()>
 where
     L: LiveView,

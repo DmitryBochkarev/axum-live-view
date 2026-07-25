@@ -205,15 +205,15 @@
 //! ## Pros
 //!
 //! - Simple programming model. You just write Rust and don't have to worry about all the
-//! complexities associated with client-side development.
+//!   complexities associated with client-side development.
 //! - You don't need to build and maintain a separate API.
 //! - Use code that isn't otherwise compatible with WASM, since your views run entirely on the
-//! server.
+//!   server.
 //!
 //! ## Cons
 //!
 //! - Increased latency. If your servers are far away from your users you might get more latency
-//! since updating the view requires a roundtrip to the server.
+//!   since updating the view requires a roundtrip to the server.
 //!
 //! [phx]: https://github.com/phoenixframework/phoenix_live_view
 //! [axum]: https://github.com/tokio-rs/axum
@@ -223,7 +223,7 @@
     clippy::all,
     clippy::dbg_macro,
     clippy::todo,
-    clippy::empty_enum,
+    clippy::empty_enums,
     clippy::enum_glob_use,
     clippy::mem_forget,
     clippy::unused_self,
@@ -232,9 +232,8 @@
     clippy::needless_borrow,
     clippy::match_wildcard_for_single_variants,
     clippy::if_let_mutex,
-    clippy::mismatched_target_os,
+    unexpected_cfgs,
     clippy::await_holding_lock,
-    clippy::match_on_vec_items,
     clippy::imprecise_flops,
     clippy::suboptimal_flops,
     clippy::lossy_float_literal,

@@ -125,7 +125,7 @@ impl Default for PaintView {
 impl LiveView for PaintView {
     type Message = Msg;
 
-    fn update(mut self, msg: Msg, data: Option<EventData>) -> Updated<Self> {
+    fn update(mut self, msg: Msg, _data: Option<EventData>) -> Updated<Self> {
         match msg {
             Msg::Paint { x, y } => {
                 if x < WIDTH && y < HEIGHT {

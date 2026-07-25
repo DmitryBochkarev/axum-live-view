@@ -70,7 +70,7 @@ fn ts_build(opt: TsBuild) -> Result {
     if check {
         cmd.arg("--noEmit");
     } else {
-        cmd.args(&["--build"]);
+        cmd.args(["--build"]);
     }
 
     run_cmd(cmd)?;
@@ -177,10 +177,10 @@ fn run_cmd(mut cmd: Command) -> Result {
 fn test_integration() -> Result {
     // 0. Kill any leftover servers from previous runs
     let _ = Command::new("pkill")
-        .args(&["-f", "example-todo"])
+        .args(["-f", "example-todo"])
         .status();
     let _ = Command::new("pkill")
-        .args(&["-f", "example-counter-sse"])
+        .args(["-f", "example-counter-sse"])
         .status();
 
     // 1. Build the JavaScript bundle
@@ -195,14 +195,14 @@ fn test_integration() -> Result {
     let mut build_cmd = Command::new("cargo");
     build_cmd
         .current_dir(project_root())
-        .args(&["build", "-p", "example-todo"]);
+        .args(["build", "-p", "example-todo"]);
     run_cmd(build_cmd)?;
 
     println!("→ Building counter-sse example...");
     let mut build_cmd = Command::new("cargo");
     build_cmd
         .current_dir(project_root())
-        .args(&["build", "-p", "example-counter-sse"]);
+        .args(["build", "-p", "example-counter-sse"]);
     run_cmd(build_cmd)?;
 
     // 3. Install integration test dependencies
@@ -219,15 +219,15 @@ fn test_integration() -> Result {
     let mut test_cmd = Command::new("npx");
     test_cmd
         .current_dir(&integration_dir)
-        .args(&["playwright", "test", "--config=playwright.config.ts"]);
+        .args(["playwright", "test", "--config=playwright.config.ts"]);
     run_cmd(test_cmd)?;
 
     // 5. Clean up any remaining servers
     let _ = Command::new("pkill")
-        .args(&["-f", "example-todo"])
+        .args(["-f", "example-todo"])
         .status();
     let _ = Command::new("pkill")
-        .args(&["-f", "example-counter-sse"])
+        .args(["-f", "example-counter-sse"])
         .status();
 
     println!("✓ Integration tests passed");
@@ -407,7 +407,7 @@ fn codegen() -> Result {
 
     let mut cmd = Command::new("cargo");
     cmd.current_dir(project_root());
-    cmd.args(&["fmt"]);
+    cmd.args(["fmt"]);
     cmd.status()?;
 
     Ok(())

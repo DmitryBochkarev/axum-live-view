@@ -269,6 +269,7 @@ impl FormView {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
+#[allow(dead_code)]
 enum ChangedInputValue {
     Select(String),
     MultiSelect(Vec<String>),
@@ -276,8 +277,8 @@ enum ChangedInputValue {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ChangedInput {
-    #[allow(dead_code)]
     input: String,
 }
 

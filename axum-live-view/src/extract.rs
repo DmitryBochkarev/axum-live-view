@@ -89,32 +89,32 @@ where
         // Check for SSE first (before WebSocket) so the SSE-enabled JS
         // client can request `Accept: text/event-stream` and get an SSE
         // stream even if WebSocket upgrade headers are also present.
-        if is_sse_request(&headers) {
-            if let Some(sse) = sse {
-                return Ok(Self {
-                    inner: LiveViewUpgradeInner::Sse {
-                        uri,
-                        headers,
-                        sse: (*sse).clone(),
-                    },
-                });
-            }
+        if is_sse_request(&headers)
+            && let Some(sse) = sse
+        {
+            return Ok(Self {
+                inner: LiveViewUpgradeInner::Sse {
+                    uri,
+                    headers,
+                    sse: (*sse).clone(),
+                },
+            });
         }
 
         // Check for long-polling after SSE but before WebSocket.
         // The JS client sets `Accept: text/x-live-view-longpoll` when
         // falling back from both WS and SSE.
-        if is_long_poll_request(&headers) {
-            if let (Some(sse), Some(lp_connections)) = (sse, lp_connections) {
-                return Ok(Self {
-                    inner: LiveViewUpgradeInner::LongPoll {
-                        uri,
-                        headers,
-                        sse: (*sse).clone(),
-                        lp_connections,
-                    },
-                });
-            }
+        if is_long_poll_request(&headers)
+            && let (Some(sse), Some(lp_connections)) = (sse, lp_connections)
+        {
+            return Ok(Self {
+                inner: LiveViewUpgradeInner::LongPoll {
+                    uri,
+                    headers,
+                    sse: (*sse).clone(),
+                    lp_connections,
+                },
+            });
         }
 
         if let Ok(ws) = WebSocketUpgrade::from_request_parts(parts, state).await {
@@ -396,16 +396,13 @@ where
     // it will wait for the view task to push the initial render into the
     // long-poll pending-message buffer.
     let body_stream = async_stream::stream! {
-        match lp_connections
+        if let Some(msgs) = lp_connections
             .wait_for_messages(&conn_id, std::time::Duration::from_secs(10))
             .await
         {
-            Some(msgs) => {
-                let json = serde_json::to_string(&LongPollResponse::Messages(msgs))
-                    .unwrap_or_else(|_| "[]".to_owned());
-                yield Ok::<_, Infallible>(bytes::Bytes::from(json));
-            }
-            None => {}
+            let json = serde_json::to_string(&LongPollResponse::Messages(msgs))
+                .unwrap_or_else(|_| "[]".to_owned());
+            yield Ok::<_, Infallible>(bytes::Bytes::from(json));
         }
     };
 

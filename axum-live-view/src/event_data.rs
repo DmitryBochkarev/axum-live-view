@@ -179,7 +179,7 @@ mod inner {
                     FormSerializationError(QuerySerializationErrorKind::Utf8Error(err))
                 })?;
 
-            let t = serde_qs::from_str(&*query).map_err(|err| {
+            let t = serde_qs::from_str(&query).map_err(|err| {
                 FormSerializationError(QuerySerializationErrorKind::Serialization(err))
             })?;
 
@@ -209,22 +209,25 @@ mod inner {
     impl std::error::Error for FormSerializationError {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             match &self.0 {
-                QuerySerializationErrorKind::Utf8Error(inner) => Some(&*inner),
-                QuerySerializationErrorKind::Serialization(inner) => Some(&*inner),
+                QuerySerializationErrorKind::Utf8Error(inner) => Some(inner),
+                QuerySerializationErrorKind::Serialization(inner) => Some(inner),
             }
         }
     }
 
+    /// Builder for creating [`Form`] events, useful in tests.
     #[derive(Clone, Debug, Default)]
     pub struct FormBuilder {
         query: String,
     }
 
     impl FormBuilder {
+        /// Create a new `FormBuilder`.
         pub fn new() -> Self {
             Self::default()
         }
 
+        /// Serialize a value into percent-encoded form data.
         pub fn serialize<T>(mut self, value: &T) -> Result<Self, FormSerializationError>
         where
             T: Serialize,
@@ -239,19 +242,25 @@ mod inner {
             Ok(self)
         }
 
+        /// Build the [`Form`] event.
         pub fn build(self) -> Form {
             Form { query: self.query }
         }
     }
 
+    /// Data from an input event.
     #[derive(Clone, Debug)]
     pub enum Input {
+        /// A boolean value (e.g. from a checkbox).
         Bool(bool),
+        /// A single string value (e.g. from a text input).
         String(String),
+        /// Multiple string values (e.g. from a multi-select).
         Strings(Vec<String>),
     }
 
     impl Input {
+        /// Get the value as a `bool`, if this is a [`Bool`](Input::Bool) variant.
         pub fn as_bool(&self) -> Option<bool> {
             if let Self::Bool(inner) = self {
                 Some(*inner)
@@ -260,6 +269,7 @@ mod inner {
             }
         }
 
+        /// Get the value as a `&str`, if this is a [`String`](Input::String) variant.
         pub fn as_str(&self) -> Option<&str> {
             if let Self::String(inner) = self {
                 Some(inner)
@@ -268,6 +278,7 @@ mod inner {
             }
         }
 
+        /// Get the value as a slice of `String`s, if this is a [`Strings`](Input::Strings) variant.
         pub fn as_strings(&self) -> Option<&[String]> {
             if let Self::Strings(inner) = self {
                 Some(inner)
@@ -280,6 +291,14 @@ mod inner {
     builder! {
         #[builder_name = KeyBuilder]
         #[derive(Debug, Clone)]
+        /// A key event.
+        ///
+        /// This event type is sent for these bindings:
+        ///
+        /// - `axm-keydown`
+        /// - `axm-keyup`
+        /// - `axm-window-keydown`
+        /// - `axm-window-keyup`
         pub struct Key {
             key: String,
             code: String,
@@ -291,26 +310,36 @@ mod inner {
     }
 
     impl Key {
+        /// The key value of the key represented by the event.
+        ///
+        /// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key).
         pub fn key(&self) -> &str {
             &self.key
         }
 
+        /// The code value of the physical key represented by the event.
+        ///
+        /// See [MDN](https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code).
         pub fn code(&self) -> &str {
             &self.code
         }
 
+        /// Whether the Alt key was pressed.
         pub fn alt(&self) -> bool {
             self.alt
         }
 
+        /// Whether the Ctrl key was pressed.
         pub fn ctrl(&self) -> bool {
             self.ctrl
         }
 
+        /// Whether the Shift key was pressed.
         pub fn shift(&self) -> bool {
             self.shift
         }
 
+        /// Whether the Meta key was pressed.
         pub fn meta(&self) -> bool {
             self.meta
         }

@@ -2,7 +2,7 @@ use axum::{response::IntoResponse, Router};
 use axum_live_view::{
     event_data::EventData, html, live_page, live_view::Updated, Html, LiveView, LiveViewUpgrade,
 };
-use std::{convert::Infallible, net::SocketAddr};
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -26,7 +26,7 @@ async fn main() {
 
 async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
     let format =
-        time::format_description::parse("[hour]:[minute]:[second].[subsecond digits:6]").unwrap();
+        time::format_description::parse_borrowed::<1>("[hour]:[minute]:[second].[subsecond digits:6]").unwrap();
 
     let view = Clock { format };
 

@@ -162,12 +162,11 @@ impl LiveView for TimerView {
             }
             Msg::SetDuration => {
                 // Extract the new duration from the slider's input event.
-                if let Some(input) = data.and_then(|d| d.as_input().cloned()) {
-                    if let Some(s) = input.as_str() {
-                        if let Ok(secs) = s.parse::<u64>() {
-                            self.duration_ms = secs * 1000;
-                        }
-                    }
+                if let Some(input) = data.and_then(|d| d.as_input().cloned())
+                    && let Some(s) = input.as_str()
+                    && let Ok(secs) = s.parse::<u64>()
+                {
+                    self.duration_ms = secs * 1000;
                 }
                 // Note: if elapsed < duration after this update, the next Tick
                 // will resume incrementing. If elapsed >= duration, the timer
@@ -310,9 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn tick_stops_when_elapsed_reaches_duration() {
-        let mut view_state = TimerView::default();
-        // Set a short duration of 300ms.
-        view_state.duration_ms = 300;
+        let view_state = TimerView { duration_ms: 300, ..Default::default() };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -331,9 +328,8 @@ mod tests {
 
     #[tokio::test]
     async fn tick_clamps_to_duration() {
-        let mut view_state = TimerView::default();
         // 300ms with 100ms ticks — after 3 ticks it should clamp to exactly 300ms.
-        view_state.duration_ms = 300;
+        let view_state = TimerView { duration_ms: 300, ..Default::default() };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -357,8 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn increasing_duration_restarts_timer() {
-        let mut view_state = TimerView::default();
-        view_state.duration_ms = 300;
+        let view_state = TimerView { duration_ms: 300, ..Default::default() };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -427,8 +422,7 @@ mod tests {
 
     #[tokio::test]
     async fn reset_restarts_completed_timer() {
-        let mut view_state = TimerView::default();
-        view_state.duration_ms = 500;
+        let view_state = TimerView { duration_ms: 500, ..Default::default() };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -451,8 +445,7 @@ mod tests {
 
     #[tokio::test]
     async fn gauge_shows_correct_fill() {
-        let mut view_state = TimerView::default();
-        view_state.duration_ms = 1000; // 1s
+        let view_state = TimerView { duration_ms: 1000, ..Default::default() };
 
         let view = run_live_view(view_state).mount().await;
 

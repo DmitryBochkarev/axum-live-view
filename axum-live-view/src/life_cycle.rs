@@ -180,7 +180,8 @@ where
                     handle,
                     reply_tx,
                 } => {
-                    let _ = reply_tx.send(view.mount(uri, &headers, handle));
+                    view.mount(uri, &headers, handle);
+                    let _ = reply_tx.send(());
                 }
                 ViewRequest::Render { reply_tx } => {
                     let _ = reply_tx

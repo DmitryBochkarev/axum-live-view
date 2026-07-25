@@ -263,45 +263,45 @@ impl LiveView for TennisApp {
             Msg::Refresh => {}
 
             Msg::Player1Input => {
-                if let Some(input) = data.and_then(|d| d.as_input().cloned()) {
-                    if let Some(value) = input.as_str() {
-                        self.player_1 = value.to_owned();
-                    }
+                if let Some(input) = data.and_then(|d| d.as_input().cloned())
+                    && let Some(value) = input.as_str()
+                {
+                    self.player_1 = value.to_owned();
                 }
             }
             Msg::Player2Input => {
-                if let Some(input) = data.and_then(|d| d.as_input().cloned()) {
-                    if let Some(value) = input.as_str() {
-                        self.player_2 = value.to_owned();
-                    }
+                if let Some(input) = data.and_then(|d| d.as_input().cloned())
+                    && let Some(value) = input.as_str()
+                {
+                    self.player_2 = value.to_owned();
                 }
             }
             Msg::CreateMatch => {
-                if let Some(form) = data.and_then(|d| d.as_form().cloned()) {
-                    if let Ok(values) = form.deserialize::<NewMatchFormData>() {
-                        let p1 = values.player_1.trim().to_owned();
-                        let p2 = values.player_2.trim().to_owned();
-                        if !p1.is_empty() && !p2.is_empty() {
-                            // Modify the shared state …
-                            {
-                                let mut data = self.data.write().unwrap();
-                                let id = data.next_id;
-                                data.next_id += 1;
-                                data.matches.insert(
-                                    0,
-                                    Match {
-                                        id,
-                                        player_1: Player::new(p1),
-                                        player_2: Player::new(p2),
-                                        finished: false,
-                                    },
-                                );
-                            }
-                            self.player_1.clear();
-                            self.player_2.clear();
-                            // … then tell every connected browser (including this one).
-                            let _ = self.tx.send(RefreshPing);
+                if let Some(form) = data.and_then(|d| d.as_form().cloned())
+                    && let Ok(values) = form.deserialize::<NewMatchFormData>()
+                {
+                    let p1 = values.player_1.trim().to_owned();
+                    let p2 = values.player_2.trim().to_owned();
+                    if !p1.is_empty() && !p2.is_empty() {
+                        // Modify the shared state …
+                        {
+                            let mut data = self.data.write().unwrap();
+                            let id = data.next_id;
+                            data.next_id += 1;
+                            data.matches.insert(
+                                0,
+                                Match {
+                                    id,
+                                    player_1: Player::new(p1),
+                                    player_2: Player::new(p2),
+                                    finished: false,
+                                },
+                            );
                         }
+                        self.player_1.clear();
+                        self.player_2.clear();
+                        // … then tell every connected browser (including this one).
+                        let _ = self.tx.send(RefreshPing);
                     }
                 }
             }
