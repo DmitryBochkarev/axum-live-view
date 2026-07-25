@@ -59,6 +59,10 @@ function detectTransportPreference(): "sse" | "websocket" | "longpoll" | "auto" 
   if (content === "longpoll" || content === "long-poll" || content == "lp") {
     return "longpoll"
   }
+  console.warn(
+    `axum-live-view: unrecognized transport preference "${content}" in <meta name="live-view-transport">. ` +
+    `Supported values: "sse", "websocket" (or "ws"), "longpoll" (or "lp"). Falling back to "auto".`,
+  )
   return "auto"
 }
 
@@ -108,6 +112,7 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
   const socket = new WebSocket(url)
   var state: State = {}
   var fallbackCalled = false
+  var transport: Transport | null = null
 
   socket.addEventListener("open", () => {
     // WebSocket connected successfully
@@ -116,7 +121,7 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
       container.setAttribute("data-lv-connected", "true")
     }
 
-    const transport: Transport = {
+    transport = {
       send(msg: MessageToView): void {
         socket.send(JSON.stringify(msg))
       },
@@ -131,7 +136,7 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
       if (options.debug) {
         console.time(pingTimeLabel)
       }
-      transport.send(msg)
+      transport!.send(msg)
     }, 30 * 1000)
 
     // Bind initial events
@@ -140,7 +145,7 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
 
   socket.addEventListener("message", (event) => {
     const msg: MessageFromView = JSON.parse(event.data)
-    handleServerMessage(null, msg, state, options)
+    handleServerMessage(transport, msg, state, options)
   })
 
   socket.addEventListener("close", () => {
@@ -218,6 +223,9 @@ function connectSseInner(options: LiveViewOptions, onError: () => void) {
       if (container) {
         container.setAttribute("data-lv-connected", "true")
       }
+
+      // Bind initial events now that transport is ready
+      bindInitialEvents(transport, options)
 
       // Clear old heartbeat interval and start a new one
       if (sseHeartbeatInterval !== null) {
@@ -324,6 +332,9 @@ function connectLongPoll(options: LiveViewOptions) {
           if (container) {
             container.setAttribute("data-lv-connected", "true")
           }
+
+          // Bind initial events now that transport is ready
+          bindInitialEvents(transport, options)
 
           // Heartbeat
           if (longPollHeartbeatInterval !== null) {
@@ -457,11 +468,9 @@ function handleServerMessage(
 ) {
   if (msg.t === "i") {
     state.viewState = msg.d
-    // DOM is already populated from the initial HTTP response,
-    // so we only need to bind event listeners (no morph needed).
-    if (transport) {
-      bindInitialEvents(transport, options)
-    }
+    // DOM is already populated from the initial HTTP response.
+    // bindInitialEvents is called by each transport at connection time
+    // (WS: in open handler, SSE/long-poll: after receiving connection ID).
 
   } else if (msg.t === "r") {
     if (!state.viewState) { return }

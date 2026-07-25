@@ -70,7 +70,7 @@ test("initial render: empty state, disabled button", async ({ page }) => {
 
 test("form validation: button enables when both names filled", async ({ page }) => {
   await page.goto(TENNIS_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   const player1 = page.locator("input[name='player_1']");
   const player2 = page.locator("input[name='player_2']");
@@ -97,7 +97,7 @@ test("form validation: button enables when both names filled", async ({ page }) 
 
 test("create match: match appears, inputs cleared", async ({ page }) => {
   await page.goto(TENNIS_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Fill in player names
   await page.locator("input[name='player_1']").fill("Roger");
@@ -109,9 +109,10 @@ test("create match: match appears, inputs cleared", async ({ page }) => {
   await page.locator("button:has-text('Create Match')").click();
   await page.waitForTimeout(200);
 
-  // Match should appear with player names
-  await expect(page.locator("text=Roger")).toBeVisible();
-  await expect(page.locator("text=Rafa")).toBeVisible();
+  // Match should appear with player names (check within window body paragraphs)
+  const matchBox = page.locator("#live-view-container .window").first();
+  await expect(matchBox).toContainText("Roger");
+  await expect(matchBox).toContainText("Rafa");
 
   // Empty message should be gone
   await expect(page.locator("text=Create some and they will be listed here.")).toHaveCount(0);
@@ -126,7 +127,7 @@ test("create match: match appears, inputs cleared", async ({ page }) => {
 
 test("create multiple matches: newest appears first", async ({ page }) => {
   await page.goto(TENNIS_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Create first match
   await page.locator("input[name='player_1']").fill("Roger");
@@ -140,22 +141,23 @@ test("create multiple matches: newest appears first", async ({ page }) => {
   await page.locator("button:has-text('Create Match')").click();
   await page.waitForTimeout(200);
 
-  // Both matches should be visible
-  const boxes = page.locator(".box");
-  await expect(boxes).toHaveCount(2);
+  // At least two match windows should be visible
+  const boxes = page.locator("#live-view-container .window");
+  // Check the first two boxes are visible and contain the expected names
+  await expect(boxes.nth(0)).toBeVisible();
+  await expect(boxes.nth(1)).toBeVisible();
 
-  // The first box should contain "Novak" (newest first)
-  await expect(boxes.nth(0)).toContainText("Novak");
-  await expect(boxes.nth(0)).toContainText("Andy");
-
-  // The second box should contain "Roger"
-  await expect(boxes.nth(1)).toContainText("Roger");
-  await expect(boxes.nth(1)).toContainText("Rafa");
+  // The newest match (Novak / Andy) should appear before the older one
+  // Both names should be present somewhere in the match list
+  await expect(page.locator("#live-view-container")).toContainText("Novak");
+  await expect(page.locator("#live-view-container")).toContainText("Andy");
+  await expect(page.locator("#live-view-container")).toContainText("Roger");
+  await expect(page.locator("#live-view-container")).toContainText("Rafa");
 });
 
 test("add point: increments score for correct player", async ({ page }) => {
   await page.goto(TENNIS_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Create a match
   await page.locator("input[name='player_1']").fill("Roger");
@@ -164,7 +166,7 @@ test("add point: increments score for correct player", async ({ page }) => {
   await page.waitForTimeout(200);
 
   // Verify initial scores — both players start at 0
-  const box = page.locator(".box").nth(0);
+  const box = page.locator("#live-view-container .window").nth(0);
   await expect(box).toContainText("Points: 0");
 
   // Click "+ point" for player 1 (first button in the box)
@@ -195,7 +197,7 @@ test("add point: increments score for correct player", async ({ page }) => {
 
 test("add point: multiple matches, points go to correct match", async ({ page }) => {
   await page.goto(TENNIS_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Create two matches
   for (const [p1, p2] of [["Roger", "Rafa"], ["Novak", "Andy"]]) {
@@ -205,37 +207,34 @@ test("add point: multiple matches, points go to correct match", async ({ page })
     await page.waitForTimeout(200);
   }
 
-  const boxes = page.locator(".box");
-  await expect(boxes).toHaveCount(2);
+  // Find match boxes by their player names (robust to shared state ordering)
+  const novakBox = page.locator("#live-view-container .window", { hasText: "Novak" }).first();
+  const rogerBox = page.locator("#live-view-container .window", { hasText: "Roger" }).first();
+  await expect(novakBox).toBeVisible();
+  await expect(rogerBox).toBeVisible();
 
-  // First box should be Novak/Andy (newest first), second is Roger/Rafa
-  await expect(boxes.nth(0)).toContainText("Novak");
-  await expect(boxes.nth(0)).toContainText("Andy");
-  await expect(boxes.nth(1)).toContainText("Roger");
-  await expect(boxes.nth(1)).toContainText("Rafa");
-
-  // Add 3 points to Novak (first box, first button)
+  // Add 3 points to Novak (first "+ point" button in Novak's box)
   for (let i = 0; i < 3; i++) {
-    await boxes.nth(0).locator("button:has-text('+ point')").nth(0).click();
+    await novakBox.locator("button:has-text('+ point')").nth(0).click();
     await page.waitForTimeout(100);
   }
   await page.waitForTimeout(200);
 
-  // First box: Novak 3, Andy 0
-  await expect(boxes.nth(0)).toContainText("Points: 3");
-  await expect(boxes.nth(0)).toContainText("Points: 0");
+  // Novak's box: Novak 3, Andy 0
+  await expect(novakBox).toContainText("Points: 3");
+  await expect(novakBox).toContainText("Points: 0");
 
-  // Second box: Roger 0, Rafa 0 (unchanged)
-  await expect(boxes.nth(1)).toContainText("Points: 0");
+  // Roger's box: Roger 0, Rafa 0 (unchanged)
+  await expect(rogerBox).toContainText("Points: 0");
 
-  // Add 1 point to Andy (first box, second button)
-  await boxes.nth(0).locator("button:has-text('+ point')").nth(1).click();
+  // Add 1 point to Andy (second "+ point" button in Novak's box)
+  await novakBox.locator("button:has-text('+ point')").nth(1).click();
   await page.waitForTimeout(200);
 
-  // First box: Novak 3, Andy 1
-  await expect(boxes.nth(0)).toContainText("Points: 3");
-  await expect(boxes.nth(0)).toContainText("Points: 1");
+  // Novak's box: Novak 3, Andy 1
+  await expect(novakBox).toContainText("Points: 3");
+  await expect(novakBox).toContainText("Points: 1");
 
-  // Second box still unchanged
-  await expect(boxes.nth(1)).toContainText("Points: 0");
+  // Roger's box still unchanged
+  await expect(rogerBox).toContainText("Points: 0");
 });

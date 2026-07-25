@@ -198,6 +198,13 @@ fn test_integration() -> Result {
         .args(["build", "-p", "example-todo"]);
     run_cmd(build_cmd)?;
 
+    println!("→ Building tennis example...");
+    let mut build_cmd = Command::new("cargo");
+    build_cmd
+        .current_dir(project_root())
+        .args(["build", "-p", "example-tennis"]);
+    run_cmd(build_cmd)?;
+
     println!("→ Building counter-sse example...");
     let mut build_cmd = Command::new("cargo");
     build_cmd

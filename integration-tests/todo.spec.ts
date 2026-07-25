@@ -55,8 +55,8 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
 test("filter: all → completed → all shows items again", async ({ page }) => {
   await page.goto(TODO_SERVER_URL);
 
-  // Wait for the live view container to be present
-  await page.waitForSelector("#live-view-container");
+  // Wait for the live view container to be present and connected
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Add two todo items
   await page.fill(".add-todo-input", "First item");
@@ -93,7 +93,7 @@ test("filter: all → completed → all shows items again", async ({ page }) => 
 
 test("filter: add items, click completed, click all — regression test", async ({ page }) => {
   await page.goto(TODO_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Add 3 items
   const items = ["Alpha", "Beta", "Gamma"];
@@ -137,7 +137,7 @@ test("filter: add items, click completed, click all — regression test", async 
 
 test("filter: toggle between all filters multiple times", async ({ page }) => {
   await page.goto(TODO_SERVER_URL);
-  await page.waitForSelector("#live-view-container");
+  await page.waitForSelector("#live-view-container[data-lv-connected]");
 
   // Add one item
   await page.fill(".add-todo-input", "Only item");
