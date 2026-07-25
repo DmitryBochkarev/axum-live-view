@@ -26,6 +26,7 @@ interface LiveViewOptions {
 interface State {
   viewState?: Template;
   sseId?: string;
+  longPollId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,8 +43,8 @@ interface Transport {
 // ---------------------------------------------------------------------------
 
 /// Reads <meta name="live-view-transport" content="..."> from the page head.
-/// Supported values: "sse", "websocket" (or "ws"), "auto" (default).
-function detectTransportPreference(): "sse" | "websocket" | "auto" {
+/// Supported values: "sse", "websocket" (or "ws"), "longpoll", "auto" (default).
+function detectTransportPreference(): "sse" | "websocket" | "longpoll" | "auto" {
   const meta = document.querySelector("meta[name='live-view-transport']")
   if (!meta) {
     return "auto"
@@ -54,6 +55,9 @@ function detectTransportPreference(): "sse" | "websocket" | "auto" {
   }
   if (content === "websocket" || content === "ws") {
     return "websocket"
+  }
+  if (content === "longpoll" || content === "long-poll" || content == "lp") {
+    return "longpoll"
   }
   return "auto"
 }
@@ -75,10 +79,15 @@ function connect(options: LiveViewOptions) {
       // WebSocket failed and no fallback is allowed; retry after delay
       setTimeout(() => connect(options), 1000)
     })
+  } else if (preference === "longpoll") {
+    // Long-poll only — skip WS and SSE entirely
+    connectLongPoll(options)
   } else {
-    // Auto: try WebSocket first, fall back to SSE
+    // Auto: try WebSocket first, fall back to SSE, then long-poll
     connectWs(options, () => {
-      connectSse(options)
+      connectSseWithFallback(options, () => {
+        connectLongPoll(options)
+      })
     })
   }
 }
@@ -166,10 +175,35 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
 var sseHeartbeatInterval: number | null = null
 
 function connectSse(options: LiveViewOptions) {
+  connectSseInner(options, () => {
+    // SSE failed — reconnect after a delay (retry WS first)
+    setTimeout(() => {
+      connect(options)
+    }, 1000)
+  })
+}
+
+function connectSseWithFallback(options: LiveViewOptions, onFallback: () => void) {
+  connectSseInner(options, onFallback)
+}
+
+function connectSseInner(options: LiveViewOptions, onError: () => void) {
   const url = `${window.location.pathname}`
-  const eventSource = new EventSource(url)
+  var eventSource: EventSource
   var state: State = {}
   var transport: Transport | null = null
+  var errorCalled = false
+
+  try {
+    eventSource = new EventSource(url)
+  } catch (_e) {
+    // EventSource constructor can throw in some environments
+    if (!errorCalled) {
+      errorCalled = true
+      onError()
+    }
+    return
+  }
 
   eventSource.addEventListener("message", (event) => {
     const msg: MessageFromView = JSON.parse(event.data)
@@ -212,6 +246,13 @@ function connectSse(options: LiveViewOptions) {
       clearInterval(sseHeartbeatInterval)
       sseHeartbeatInterval = null
     }
+    // If we never received the initial message (connection failed),
+    // call onError to fall back to next transport.
+    if (!state.sseId && !errorCalled) {
+      errorCalled = true
+      onError()
+      return
+    }
     // Reconnect after a delay
     setTimeout(() => {
       connect(options)
@@ -241,6 +282,164 @@ function sendSseEvent(sseId: string, msg: MessageToView): void {
     body: JSON.stringify(msg),
   }).catch((err) => {
     console.error("Failed to send SSE event:", err)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Long-Poll transport (last-resort fallback)
+// ---------------------------------------------------------------------------
+
+var longPollHeartbeatInterval: number | null = null
+
+function connectLongPoll(options: LiveViewOptions) {
+  const url = `${window.location.pathname}`
+  var state: State = {}
+  var transport: Transport | null = null
+
+  // Initial poll: opens the view on the server and gets the initial
+  // render + connection ID.
+  fetch(url, {
+    headers: {
+      "Accept": "text/x-live-view-longpoll",
+    },
+  })
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`long-poll initial request failed: ${response.status}`)
+      }
+      return response.json()
+    })
+    .then((messages: MessageFromView[]) => {
+      if (!messages || messages.length === 0) {
+        throw new Error("empty initial long-poll response")
+      }
+
+      // Find the initial render message to get the connection ID
+      for (const msg of messages) {
+        if (msg.t === "i" && "id" in msg) {
+          state.longPollId = (msg as any).id
+          transport = createLongPollTransport(state.longPollId!)
+
+          const container = document.getElementById("live-view-container")
+          if (container) {
+            container.setAttribute("data-lv-connected", "true")
+          }
+
+          // Heartbeat
+          if (longPollHeartbeatInterval !== null) {
+            clearInterval(longPollHeartbeatInterval)
+          }
+          longPollHeartbeatInterval = setInterval(() => {
+            if (options.debug) {
+              console.time(pingTimeLabel)
+            }
+            sendLongPollEvent(state.longPollId!, { t: "h" })
+          }, 30 * 1000)
+        }
+
+        handleServerMessage(transport, msg, state, options)
+      }
+
+      // Start the long-poll loop for subsequent updates
+      startLongPollLoop(options, state)
+    })
+    .catch((err) => {
+      console.error("Long-poll connection failed:", err)
+      const container = document.getElementById("live-view-container")
+      if (container) {
+        container.removeAttribute("data-lv-connected")
+      }
+      // Retry after a delay
+      setTimeout(() => {
+        connect(options)
+      }, 3000)
+    })
+}
+
+function startLongPollLoop(options: LiveViewOptions, state: State) {
+  if (!state.longPollId) {
+    return
+  }
+
+  const url = `${window.location.pathname}`
+
+  const doPoll = () => {
+    if (!state.longPollId) {
+      return
+    }
+
+    fetch(url, {
+      headers: {
+        "Accept": "text/x-live-view-longpoll",
+        "x-live-view-id": state.longPollId,
+      },
+    })
+      .then((response) => {
+        if (!response.ok) {
+          if (response.status === 410) {
+            // Connection expired — reconnect from scratch
+            throw new Error("connection expired")
+          }
+          throw new Error(`long-poll request failed: ${response.status}`)
+        }
+        return response.json()
+      })
+      .then((messages: MessageFromView[]) => {
+        if (!messages || messages.length === 0) {
+          // Empty response means timeout; loop continues
+          return
+        }
+
+        const transport = createLongPollTransport(state.longPollId!)
+        for (const msg of messages) {
+          handleServerMessage(transport, msg, state, options)
+        }
+
+        // Immediately start next poll
+        doPoll()
+      })
+      .catch((err) => {
+        console.error("Long-poll error:", err)
+        const container = document.getElementById("live-view-container")
+        if (container) {
+          container.removeAttribute("data-lv-connected")
+        }
+        if (longPollHeartbeatInterval !== null) {
+          clearInterval(longPollHeartbeatInterval)
+          longPollHeartbeatInterval = null
+        }
+        // Reconnect after a delay
+        setTimeout(() => {
+          connect(options)
+        }, 3000)
+      })
+  }
+
+  doPoll()
+}
+
+function createLongPollTransport(longPollId: string): Transport {
+  return {
+    send(msg: MessageToView): void {
+      sendLongPollEvent(longPollId, msg)
+    },
+    disconnect(): void {
+      // No persistent connection to close; the next poll will 410
+    },
+  }
+}
+
+function sendLongPollEvent(longPollId: string, msg: MessageToView): void {
+  fetch(`${window.location.pathname}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-live-view-event": "true",
+      "x-live-view-id": longPollId,
+    },
+    body: JSON.stringify(msg),
+  }).catch((err) => {
+    console.error("Failed to send long-poll event:", err)
   })
 }
 

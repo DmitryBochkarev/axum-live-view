@@ -268,6 +268,8 @@ pub mod extract;
 pub mod js_command;
 pub mod live_view;
 pub mod sse;
+pub(crate) mod long_poll;
+pub(crate) mod transport;
 pub mod test;
 
 mod html;
