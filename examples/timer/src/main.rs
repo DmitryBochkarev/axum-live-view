@@ -1,17 +1,15 @@
-use axum::{Extension, 
+use axum::{
     http::{header, HeaderMap, Uri},
     response::IntoResponse,
     routing::get,
     Router,
 };
 use axum_live_view::{
-    sse::LiveViewSseState,
     event_data::EventData,
     html,
     live_view::{Updated, ViewHandle},
-    page, Html, LiveView, 
+    Html, LiveView, LiveViewUpgrade,
 };
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -24,36 +22,14 @@ use tokio::net::TcpListener;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let sse = Arc::new(LiveViewSseState::new());
-
-    let app = Router::new()
-        .merge(page::live_view_page("/", |embed| {
-            html! {
-                <!DOCTYPE html>
-                <html>
-                    <head>
-                        <title>"Timer"</title>
-                        <link rel="stylesheet" href="/xp.css" />
-                    </head>
-                    <body style="margin: 0; padding: 0;">
-                        <div class="window" style="max-width: 480px; margin: 2rem auto;">
-                            <div class="title-bar">
-                                <div class="title-bar-text">"⏱ Timer"</div>
-                            </div>
-                            <div class="window-body">
-                                { embed.embed(TimerView::default()) }
-                            </div>
-                        </div>
-                        <script src="/bundle.js"></script>
-                    </body>
-                </html>
-            }
-        }))
-        .route("/bundle.js", axum_live_view::precompiled_js())
-        .route("/xp.css", get(xp_css))
-        .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
-        .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
-        .layer(Extension(sse));
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+            .route("/bundle.js", axum_live_view::precompiled_js())
+            .route("/xp.css", get(xp_css))
+            .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
+            .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
+    );
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -62,6 +38,37 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
+    let view = TimerView::default();
+
+    live.response(move |embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <title>"Timer"</title>
+                    <link rel="stylesheet" href="/xp.css" />
+                </head>
+                <body style="margin: 0; padding: 0;">
+                    <div class="window" style="max-width: 480px; margin: 2rem auto;">
+                        <div class="title-bar">
+                            <div class="title-bar-text">"⏱ Timer"</div>
+                        </div>
+                        <div class="window-body">
+                            { embed.embed(view) }
+                        </div>
+                    </div>
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -267,8 +274,7 @@ enum Msg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum_live_view::{
-    sse::LiveViewSseState,event_data, test::run_live_view};
+    use axum_live_view::{event_data, test::run_live_view};
 
     /// Helper to build an input event with a string value (simulating a slider
     /// change).

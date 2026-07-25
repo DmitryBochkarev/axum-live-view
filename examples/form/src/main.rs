@@ -1,31 +1,20 @@
-use axum::{Extension, Router};
+use axum::{response::IntoResponse, routing::get, Router};
 use axum_live_view::{
-    sse::LiveViewSseState,
-    event_data::EventData, html, live_view::Updated, page, Html, LiveView, 
+    event_data::EventData, html, live_view::Updated, Html, LiveView, LiveViewUpgrade,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr};
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    let sse = Arc::new(LiveViewSseState::new());
+    tracing_subscriber::fmt::init();
 
-    let app = Router::new()
-        .merge(page::live_view_page("/", |embed| {
-            html! {
-                <!DOCTYPE html>
-                <html>
-                    <head></head>
-                    <body>
-                        { embed.embed(FormView::default()) }
-                        <script src="/bundle.js"></script>
-                    </body>
-                </html>
-            }
-        }))
-        .route("/bundle.js", axum_live_view::precompiled_js())
-        .layer(Extension(sse));
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+            .route("/bundle.js", axum_live_view::precompiled_js())
+    );
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -34,6 +23,24 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
+    let view = FormView::default();
+
+    live.response(move |embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                </head>
+                <body>
+                    { embed.embed(view) }
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
 }
 
 #[derive(Default, Clone)]
@@ -258,6 +265,20 @@ impl FormView {
                 .push("cannot check more than 3 boxes".to_owned());
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ChangedInputValue {
+    Select(String),
+    MultiSelect(Vec<String>),
+    RadioOrCheckbox(bool),
+}
+
+#[derive(Debug, Deserialize)]
+struct ChangedInput {
+    #[allow(dead_code)]
+    input: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

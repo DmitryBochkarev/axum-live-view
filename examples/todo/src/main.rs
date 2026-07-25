@@ -1,35 +1,20 @@
-use axum::{Extension, Router};
+use axum::{Router, response::IntoResponse, routing::get};
 use axum_live_view::{
-    sse::LiveViewSseState,
-    event_data::EventData, html, live_view::Updated, page, Html, LiveView, 
+    Html, LiveView, LiveViewUpgrade, event_data::EventData, html, live_view::Updated,
 };
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let sse = Arc::new(LiveViewSseState::new());
-
-    let app = Router::new()
-        .merge(page::live_view_page("/", |embed| {
-            html! {
-                <!DOCTYPE html>
-                <html>
-                    <head>
-                        <style>{ STYLE }</style>
-                    </head>
-                    <body>
-                        { embed.embed(TodoApp::default()) }
-                        <script src="/bundle.js"></script>
-                    </body>
-                </html>
-            }
-        }))
-        .route("/bundle.js", axum_live_view::precompiled_js())
-        .layer(Extension(sse));
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+            .route("/bundle.js", axum_live_view::precompiled_js())
+    );
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -38,6 +23,27 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
+    let view = TodoApp::default();
+
+    live.response(move |embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <style>
+                        { STYLE }
+                    </style>
+                </head>
+                <body>
+                    { embed.embed(view) }
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
 }
 
 const STYLE: &str = r#"
@@ -418,8 +424,7 @@ enum Msg {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum_live_view::{
-    sse::LiveViewSseState,event_data::Input, test::run_live_view};
+    use axum_live_view::{event_data::Input, test::run_live_view};
 
     /// Helper to send an input event with a string value.
     fn input_event(s: &str) -> Option<axum_live_view::event_data::EventData> {

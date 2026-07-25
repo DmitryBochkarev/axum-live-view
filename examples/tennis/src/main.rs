@@ -1,12 +1,15 @@
-use axum::{Extension, 
-    http::{HeaderMap, Uri},
+use axum::{
+    extract::State,
+    http::{header, HeaderMap, Uri},
+    response::IntoResponse,
+    routing::get,
     Router,
 };
 use axum_live_view::{
     event_data::EventData,
     html,
     live_view::{Updated, ViewHandle},
-    page, sse::LiveViewSseState, Html, LiveView,
+    Html, LiveView, LiveViewUpgrade,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,88 +22,23 @@ use tokio::{net::TcpListener, sync::broadcast};
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let sse = Arc::new(LiveViewSseState::new());
-    let data = Arc::new(RwLock::new(TennisData::default()));
     let (tx, _) = broadcast::channel::<RefreshPing>(1024);
 
-    let app = Router::new()
-        .merge(page::live_view_page("/", {
-            let data = data.clone();
-            let tx = tx.clone();
-            move |embed| {
-                let view = TennisApp {
-                    data: data.clone(),
-                    tx: tx.clone(),
-                    player_1: String::new(),
-                    player_2: String::new(),
-                };
-                html! {
-                    <!DOCTYPE html>
-                    <html>
-                        <head>
-                            <title>"Tennis – Admin"</title>
-                            <link rel="stylesheet" href="/xp.css" />
-                        </head>
-                        <body>
-                            <div class="window" style="max-width: 840px; margin: 2rem auto;">
-                                <div class="title-bar">
-                                    <div class="title-bar-text">"🎾 Tennis Admin"</div>
-                                    <div class="title-bar-controls">
-                                        <a href="/observe">
-                                            <button aria-label="Observer view" style="min-width: auto;">"👀 Observer view"</button>
-                                        </a>
-                                    </div>
-                                </div>
-                                <div class="window-body">
-                                    { embed.embed(view) }
-                                </div>
-                            </div>
-                            <script src="/bundle.js"></script>
-                        </body>
-                    </html>
-                }
-            }
-        }))
-        .merge(page::live_view_page("/observe", {
-            let data = data.clone();
-            let tx = tx.clone();
-            move |embed| {
-                let view = ObserverApp {
-                    data: data.clone(),
-                    tx: tx.clone(),
-                };
-                html! {
-                    <!DOCTYPE html>
-                    <html>
-                        <head>
-                            <title>"Tennis – Live Scoreboard"</title>
-                            <link rel="stylesheet" href="/xp.css" />
-                        </head>
-                        <body>
-                            <div class="window" style="max-width: 740px; margin: 2rem auto;">
-                                <div class="title-bar">
-                                    <div class="title-bar-text">"🎾 Live Scoreboard"</div>
-                                    <div class="title-bar-controls">
-                                        <a href="/">
-                                            <button aria-label="Admin" style="min-width: auto;">"⚙️ Admin"</button>
-                                        </a>
-                                    </div>
-                                </div>
-                                <div class="window-body">
-                                    { embed.embed(view) }
-                                </div>
-                            </div>
-                            <script src="/bundle.js"></script>
-                        </body>
-                    </html>
-                }
-            }
-        }))
-        .route("/bundle.js", axum_live_view::precompiled_js())
-        .route("/xp.css", axum::routing::get(xp_css))
-        .route("/ms_sans_serif.woff", axum::routing::get(ms_sans_serif_woff))
-        .route("/ms_sans_serif.woff2", axum::routing::get(ms_sans_serif_woff2))
-        .layer(Extension(sse));
+    let state = AppState {
+        data: Arc::new(RwLock::new(TennisData::default())),
+        tx,
+    };
+
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+            .route("/observe", get(observe))
+            .route("/bundle.js", axum_live_view::precompiled_js())
+            .route("/xp.css", get(xp_css))
+            .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
+            .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
+            .with_state(state)
+    );
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -112,39 +50,129 @@ async fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared state
+// Global state stored in the axum server, shared across all connections.
 // ---------------------------------------------------------------------------
 
+/// Holds all data that is common across browsers.
 #[derive(Clone, Default, Debug)]
 struct TennisData {
     matches: Vec<Match>,
     next_id: u64,
 }
 
+/// axum application state. Cloned per-request.
+#[derive(Clone)]
+struct AppState {
+    data: Arc<RwLock<TennisData>>,
+    tx: broadcast::Sender<RefreshPing>,
+}
+
+/// Sent on every mutation so every connected browser re-renders.
 #[derive(Clone, Copy, Debug)]
 struct RefreshPing;
 
 // ---------------------------------------------------------------------------
-// Static assets
+// Handlers
 // ---------------------------------------------------------------------------
 
-async fn xp_css() -> impl axum::response::IntoResponse {
-    (
-        [(axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../assets/xp.css"),
-    )
+/// Admin page – create matches, add points.
+async fn root(
+    live: LiveViewUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let view = TennisApp {
+        data: state.data.clone(),
+        tx: state.tx.clone(),
+        player_1: String::new(),
+        player_2: String::new(),
+    };
+
+    live.response(move |embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <title>"Tennis – Admin"</title>
+                    <link rel="stylesheet" href="/xp.css" />
+                </head>
+                <body>
+                    <div class="window" style="max-width: 840px; margin: 2rem auto;">
+                        <div class="title-bar">
+                            <div class="title-bar-text">"🎾 Tennis Admin"</div>
+                            <div class="title-bar-controls">
+                                <a href="/observe">
+                                    <button aria-label="Observer view" style="min-width: auto;">"👀 Observer view"</button>
+                                </a>
+                            </div>
+                        </div>
+                        <div class="window-body">
+                            { embed.embed(view) }
+                        </div>
+                    </div>
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
 }
 
-async fn ms_sans_serif_woff() -> impl axum::response::IntoResponse {
+/// Read-only observer page – see scores update in real time, no controls.
+async fn observe(
+    live: LiveViewUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let view = ObserverApp {
+        data: state.data.clone(),
+        tx: state.tx.clone(),
+    };
+
+    live.response(move |embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <title>"Tennis – Live Scoreboard"</title>
+                    <link rel="stylesheet" href="/xp.css" />
+                </head>
+                <body>
+                    <div class="window" style="max-width: 740px; margin: 2rem auto;">
+                        <div class="title-bar">
+                            <div class="title-bar-text">"🎾 Live Scoreboard"</div>
+                            <div class="title-bar-controls">
+                                <a href="/">
+                                    <button aria-label="Admin" style="min-width: auto;">"⚙️ Admin"</button>
+                                </a>
+                            </div>
+                        </div>
+                        <div class="window-body">
+                            { embed.embed(view) }
+                        </div>
+                    </div>
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Static asset handlers
+// ---------------------------------------------------------------------------
+
+async fn xp_css() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], include_str!("../assets/xp.css"))
+}
+
+async fn ms_sans_serif_woff() -> impl IntoResponse {
     (
-        [(axum::http::header::CONTENT_TYPE, "font/woff")],
+        [(header::CONTENT_TYPE, "font/woff")],
         include_bytes!("../assets/ms_sans_serif.woff").as_ref(),
     )
 }
 
-async fn ms_sans_serif_woff2() -> impl axum::response::IntoResponse {
+async fn ms_sans_serif_woff2() -> impl IntoResponse {
     (
-        [(axum::http::header::CONTENT_TYPE, "font/woff2")],
+        [(header::CONTENT_TYPE, "font/woff2")],
         include_bytes!("../assets/ms_sans_serif.woff2").as_ref(),
     )
 }
@@ -174,7 +202,7 @@ struct Match {
 }
 
 // ---------------------------------------------------------------------------
-// Views
+// Per-connection view
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -186,6 +214,7 @@ struct TennisApp {
 }
 
 impl TennisApp {
+    /// Convenience constructor for tests.
     #[cfg(test)]
     fn new_test() -> Self {
         let (tx, _) = broadcast::channel(1024);
@@ -209,6 +238,8 @@ enum PlayerNum {
 impl LiveView for TennisApp {
     type Message = Msg;
 
+    /// Subscribe to global refresh pings. Whenever *any* browser changes the
+    /// shared state we receive [`Msg::Refresh`] and re-render.
     fn mount(
         &mut self,
         _uri: Uri,
@@ -227,7 +258,10 @@ impl LiveView for TennisApp {
 
     fn update(mut self, msg: Msg, data: Option<EventData>) -> Updated<Self> {
         match msg {
+            // Internal message triggered by the broadcast channel – just
+            // re-render with whatever the shared state contains right now.
             Msg::Refresh => {}
+
             Msg::Player1Input => {
                 if let Some(input) = data.and_then(|d| d.as_input().cloned()) {
                     if let Some(value) = input.as_str() {
@@ -248,6 +282,7 @@ impl LiveView for TennisApp {
                         let p1 = values.player_1.trim().to_owned();
                         let p2 = values.player_2.trim().to_owned();
                         if !p1.is_empty() && !p2.is_empty() {
+                            // Modify the shared state …
                             {
                                 let mut data = self.data.write().unwrap();
                                 let id = data.next_id;
@@ -264,6 +299,7 @@ impl LiveView for TennisApp {
                             }
                             self.player_1.clear();
                             self.player_2.clear();
+                            // … then tell every connected browser (including this one).
                             let _ = self.tx.send(RefreshPing);
                         }
                     }
@@ -297,7 +333,8 @@ impl LiveView for TennisApp {
 
     fn render(&self) -> Html<Self::Message> {
         let data = self.data.read().unwrap();
-        let form_is_valid = !self.player_1.trim().is_empty() && !self.player_2.trim().is_empty();
+        let form_is_valid =
+            !self.player_1.trim().is_empty() && !self.player_2.trim().is_empty();
 
         let match_colors: Vec<(&str, &str)> = data
             .matches
@@ -385,6 +422,11 @@ impl LiveView for TennisApp {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Read-only observer view
+// ---------------------------------------------------------------------------
+
+/// Shared-state backed view with no interactive controls – for observers.
 #[derive(Clone, Debug)]
 struct ObserverApp {
     data: Arc<RwLock<TennisData>>,
@@ -491,8 +533,13 @@ enum ObserverMsg {
     Refresh,
 }
 
+// ---------------------------------------------------------------------------
+// Messages & form data
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 enum Msg {
+    /// Internal: re-render because another browser changed shared state.
     Refresh,
     Player1Input,
     Player2Input,
@@ -516,10 +563,12 @@ mod tests {
     use super::*;
     use axum_live_view::{event_data, test::run_live_view};
 
+    /// Helper to build an input event with a string value.
     fn input_event(s: &str) -> Option<EventData> {
         Some(EventData::Input(event_data::Input::String(s.to_owned())))
     }
 
+    /// Helper to build a form submit event.
     fn form_submit(player_1: &str, player_2: &str) -> Option<EventData> {
         let form = event_data::Form::builder()
             .serialize(&NewMatchFormData {
@@ -535,14 +584,20 @@ mod tests {
     async fn initial_render() {
         let view = run_live_view(TennisApp::new_test()).mount().await;
         let html = view.render().await;
+
         assert!(html.contains("Tennis Matches"));
         assert!(html.contains("Create some and they will be listed here."));
+        assert!(html.contains("Player one name"));
+        assert!(html.contains("Player two name"));
     }
+
+    // -- Observer tests -------------------------------------------------------
 
     #[tokio::test]
     async fn observer_shows_empty_state() {
         let view = run_live_view(ObserverApp::new_test()).mount().await;
         let html = view.render().await;
+
         assert!(html.contains("No matches in progress."));
         assert!(!html.contains("button"));
     }
@@ -551,67 +606,242 @@ mod tests {
     async fn observer_sees_match_created_by_admin() {
         let (tx, _) = broadcast::channel(1024);
         let data = Arc::new(RwLock::new(TennisData::default()));
+
         let admin = TennisApp {
-            data: data.clone(), tx: tx.clone(),
-            player_1: String::new(), player_2: String::new(),
+            data: data.clone(),
+            tx: tx.clone(),
+            player_1: String::new(),
+            player_2: String::new(),
         };
-        let observer = ObserverApp { data: data.clone(), tx: tx.clone() };
+        let observer = ObserverApp {
+            data: data.clone(),
+            tx: tx.clone(),
+        };
+
         let admin_h = run_live_view(admin).mount().await;
         let obs_h = run_live_view(observer).mount().await;
 
-        admin_h.send(Msg::Player1Input, input_event("Serena")).await;
-        admin_h.send(Msg::Player2Input, input_event("Venus")).await;
-        admin_h.send(Msg::CreateMatch, form_submit("Serena", "Venus")).await;
+        // Admin creates a match.
+        admin_h
+            .send(Msg::Player1Input, input_event("Serena"))
+            .await;
+        admin_h
+            .send(Msg::Player2Input, input_event("Venus"))
+            .await;
+        admin_h
+            .send(Msg::CreateMatch, form_submit("Serena", "Venus"))
+            .await;
+
+        // Observer sees it after a refresh.
         let (obs_html, _) = obs_h.send(ObserverMsg::Refresh, None).await;
         assert!(obs_html.contains("Serena"));
         assert!(obs_html.contains("Venus"));
+        // No interactive elements.
         assert!(!obs_html.contains("button"));
+        assert!(!obs_html.contains("axm-click"));
     }
 
     #[tokio::test]
     async fn observer_sees_score_updates() {
         let (tx, _) = broadcast::channel(1024);
         let data = Arc::new(RwLock::new(TennisData::default()));
+
         let admin = TennisApp {
-            data: data.clone(), tx: tx.clone(),
-            player_1: String::new(), player_2: String::new(),
+            data: data.clone(),
+            tx: tx.clone(),
+            player_1: String::new(),
+            player_2: String::new(),
         };
-        let observer = ObserverApp { data: data.clone(), tx: tx.clone() };
+        let observer = ObserverApp {
+            data: data.clone(),
+            tx: tx.clone(),
+        };
+
         let admin_h = run_live_view(admin).mount().await;
         let obs_h = run_live_view(observer).mount().await;
 
-        admin_h.send(Msg::Player1Input, input_event("Roger")).await;
-        admin_h.send(Msg::Player2Input, input_event("Rafa")).await;
-        admin_h.send(Msg::CreateMatch, form_submit("Roger", "Rafa")).await;
-        admin_h.send(Msg::AddPoint(0, PlayerNum::One), None).await;
-        admin_h.send(Msg::AddPoint(0, PlayerNum::One), None).await;
-        admin_h.send(Msg::AddPoint(0, PlayerNum::Two), None).await;
+        // Create match as admin.
+        admin_h
+            .send(Msg::Player1Input, input_event("Roger"))
+            .await;
+        admin_h
+            .send(Msg::Player2Input, input_event("Rafa"))
+            .await;
+        admin_h
+            .send(Msg::CreateMatch, form_submit("Roger", "Rafa"))
+            .await;
+
+        // Add points.
+        admin_h
+            .send(Msg::AddPoint(0, PlayerNum::One), None)
+            .await;
+        admin_h
+            .send(Msg::AddPoint(0, PlayerNum::One), None)
+            .await;
+        admin_h
+            .send(Msg::AddPoint(0, PlayerNum::Two), None)
+            .await;
+
+        // Observer sees the updated score.
         let (obs_html, _) = obs_h.send(ObserverMsg::Refresh, None).await;
         assert!(obs_html.contains(">2<"));
         assert!(obs_html.contains(">1<"));
     }
 
     #[tokio::test]
+    async fn form_input_updates_player_names() {
+        let view = run_live_view(TennisApp::new_test()).mount().await;
+
+        view.send(Msg::Player1Input, input_event("Roger")).await;
+        let (html, _) = view.send(Msg::Player2Input, input_event("Rafa")).await;
+
+        assert!(html.contains("Roger"));
+        assert!(html.contains("Rafa"));
+    }
+
+    #[tokio::test]
+    async fn submit_button_enabled_only_when_form_valid() {
+        let view = run_live_view(TennisApp::new_test()).mount().await;
+
+        let html = view.render().await;
+        assert!(html.contains("disabled"));
+
+        let (html, _) = view
+            .send(Msg::Player1Input, input_event("Roger"))
+            .await;
+        assert!(html.contains("disabled"));
+
+        let (html, _) = view
+            .send(Msg::Player2Input, input_event("Rafa"))
+            .await;
+        assert!(!html.contains("disabled"));
+    }
+
+    #[tokio::test]
     async fn create_match() {
         let view = run_live_view(TennisApp::new_test()).mount().await;
+
         view.send(Msg::Player1Input, input_event("Roger")).await;
         view.send(Msg::Player2Input, input_event("Rafa")).await;
-        let (html, _) = view.send(Msg::CreateMatch, form_submit("Roger", "Rafa")).await;
+
+        let (html, _) = view
+            .send(Msg::CreateMatch, form_submit("Roger", "Rafa"))
+            .await;
+
         assert!(html.contains("Roger"));
+        assert!(html.contains("Rafa"));
         assert!(!html.contains("Create some and they will be listed here."));
+        assert!(!html.contains(r#"value="Roger""#));
+        assert!(!html.contains(r#"value="Rafa""#));
     }
 
     #[tokio::test]
     async fn create_multiple_matches() {
         let view = run_live_view(TennisApp::new_test()).mount().await;
+
         for (p1, p2) in [("Roger", "Rafa"), ("Novak", "Andy")] {
             view.send(Msg::Player1Input, input_event(p1)).await;
             view.send(Msg::Player2Input, input_event(p2)).await;
             view.send(Msg::CreateMatch, form_submit(p1, p2)).await;
         }
+
         let html = view.render().await;
         let roger_pos = html.find("Roger").unwrap();
         let novak_pos = html.find("Novak").unwrap();
         assert!(novak_pos < roger_pos);
+    }
+
+    #[tokio::test]
+    async fn add_point_to_player() {
+        let view = run_live_view(TennisApp::new_test()).mount().await;
+
+        view.send(Msg::Player1Input, input_event("Roger")).await;
+        view.send(Msg::Player2Input, input_event("Rafa")).await;
+        view.send(Msg::CreateMatch, form_submit("Roger", "Rafa")).await;
+
+        let (html, _) = view.send(Msg::AddPoint(0, PlayerNum::One), None).await;
+        assert!(html.contains("Points: 1"));
+
+        let (html, _) = view.send(Msg::AddPoint(0, PlayerNum::One), None).await;
+        assert!(html.contains("Points: 2"));
+
+        let (html, _) = view.send(Msg::AddPoint(0, PlayerNum::Two), None).await;
+        assert!(html.contains("Points: 1"));
+    }
+
+    #[tokio::test]
+    async fn empty_form_does_not_create_match() {
+        let view = run_live_view(TennisApp::new_test()).mount().await;
+
+        let (html, _) = view
+            .send(Msg::CreateMatch, form_submit("", ""))
+            .await;
+
+        assert!(html.contains("Create some and they will be listed here."));
+    }
+
+    #[tokio::test]
+    async fn whitespace_only_names_rejected() {
+        let view = run_live_view(TennisApp::new_test()).mount().await;
+
+        view.send(Msg::Player1Input, input_event("   ")).await;
+        view.send(Msg::Player2Input, input_event("   ")).await;
+        let (html, _) = view
+            .send(Msg::CreateMatch, form_submit("   ", "   "))
+            .await;
+
+        assert!(html.contains("Create some and they will be listed here."));
+    }
+
+    /// Verify that two separate views see the same shared state.
+    #[tokio::test]
+    async fn two_views_share_state() {
+        let (tx, _) = broadcast::channel(1024);
+        let data = Arc::new(RwLock::new(TennisData::default()));
+
+        let view1 = TennisApp {
+            data: data.clone(),
+            tx: tx.clone(),
+            player_1: String::new(),
+            player_2: String::new(),
+        };
+        let view2 = TennisApp {
+            data: data.clone(),
+            tx: tx.clone(),
+            player_1: String::new(),
+            player_2: String::new(),
+        };
+
+        let handle1 = run_live_view(view1).mount().await;
+        let handle2 = run_live_view(view2).mount().await;
+
+        // View 1 creates a match.
+        handle1
+            .send(Msg::Player1Input, input_event("Roger"))
+            .await;
+        handle1
+            .send(Msg::Player2Input, input_event("Rafa"))
+            .await;
+        handle1
+            .send(Msg::CreateMatch, form_submit("Roger", "Rafa"))
+            .await;
+
+        // View 2 should see it immediately (it re-renders on its own from the
+        // broadcast when Refresh spawns are run). But in test mode spawns are
+        // dropped, so we send Refresh manually.
+        let (html2, _) = handle2.send(Msg::Refresh, None).await;
+        assert!(html2.contains("Roger"));
+        assert!(html2.contains("Rafa"));
+
+        // View 2 adds a point.
+        handle2
+            .send(Msg::AddPoint(0, PlayerNum::One), None)
+            .await;
+        let (html2, _) = handle2.send(Msg::Refresh, None).await;
+        assert!(html2.contains("Points: 1"));
+
+        // View 1 sees the point too.
+        let (html1, _) = handle1.send(Msg::Refresh, None).await;
+        assert!(html1.contains("Points: 1"));
     }
 }

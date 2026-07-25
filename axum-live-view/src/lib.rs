@@ -17,13 +17,15 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     // A normal axum router...
-//!     let app = Router::new()
-//!         .route("/", get(root))
-//!         // Use a precompiled and minified build of axum-live-view's JavaScript.
-//!         // This is the easiest way to get started. Integration with bundlers
-//!         // is of course also possible.
-//!         .route("/assets/live-view.js", axum_live_view::precompiled_js());
+//!     // Build the router and enable SSE support via setup()
+//!     let app = axum_live_view::setup(
+//!         Router::new()
+//!             .route("/", get(root))
+//!             // Use a precompiled and minified build of axum-live-view's JavaScript.
+//!             // This is the easiest way to get started. Integration with bundlers
+//!             // is of course also possible.
+//!             .route("/assets/live-view.js", axum_live_view::precompiled_js())
+//!     );
 //!
 //!     # async {
 //!     // ...that we run like any other axum app
@@ -268,7 +270,6 @@ pub mod event_data;
 pub mod extract;
 pub mod js_command;
 pub mod live_view;
-pub mod page;
 pub mod sse;
 pub mod test;
 
@@ -281,6 +282,7 @@ pub use self::{
     extract::LiveViewUpgrade,
     html::Html,
     live_view::LiveView,
+    sse::setup,
 };
 
 #[doc = include_str!("docs/html.md")]

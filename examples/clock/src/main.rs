@@ -1,39 +1,19 @@
-use axum::{Extension, Router};
+use axum::{response::IntoResponse, routing::get, Router};
 use axum_live_view::{
-    event_data::EventData, html, live_view::Updated, page,
-    sse::LiveViewSseState, Html, LiveView,
+    event_data::EventData, html, live_view::Updated, Html, LiveView, LiveViewUpgrade,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr};
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    let sse = Arc::new(LiveViewSseState::new());
+    tracing_subscriber::fmt::init();
 
-    let app = Router::new()
-        .merge(page::live_view_page("/", {
-            let format = time::format_description::parse(
-                "[hour]:[minute]:[second].[subsecond digits:6]",
-            )
-            .unwrap();
-            move |embed| {
-                let view = Clock {
-                    format: format.clone(),
-                };
-                html! {
-                    <!DOCTYPE html>
-                    <html>
-                        <head></head>
-                        <body>
-                            { embed.embed(view) }
-                            <script src="/bundle.js"></script>
-                        </body>
-                    </html>
-                }
-            }
-        }))
-        .route("/bundle.js", axum_live_view::precompiled_js())
-        .layer(Extension(sse));
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+            .route("/bundle.js", axum_live_view::precompiled_js())
+    );
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -42,6 +22,27 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
+    let format =
+        time::format_description::parse("[hour]:[minute]:[second].[subsecond digits:6]").unwrap();
+
+    let view = Clock { format };
+
+    live.response(move |embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                </head>
+                <body>
+                    { embed.embed(view) }
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
 }
 
 #[derive(Clone)]
@@ -75,6 +76,7 @@ impl LiveView for Clock {
 
     fn render(&self) -> Html<Self::Message> {
         let now = time::OffsetDateTime::now_utc();
+
         html! {
             "Current time:" { now.format(&self.format).unwrap() }
         }

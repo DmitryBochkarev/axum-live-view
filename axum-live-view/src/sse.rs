@@ -1,11 +1,8 @@
 //! SSE (Server-Sent Events) transport internals.
 //!
 //! This module provides the low-level SSE machinery: connection state,
-//! the background connection task, and the SSE stream type.
-//!
-//! For the high-level entry point, see [`page::live_view_page`].
-//!
-//! [`page::live_view_page`]: crate::page::live_view_page
+//! the background connection task, the SSE stream type, and the POST
+//! event handler for receiving client events.
 
 use crate::{
     event_data::EventData,
@@ -16,9 +13,11 @@ use crate::{
     util::ReceiverStream,
     LiveView,
 };
-use axum::response::sse::Event;
+use axum::{
+    http::{HeaderMap, StatusCode, Uri},
+    response::{IntoResponse, Response, sse::Event},
+};
 use futures_util::stream::Stream;
-use http::{HeaderMap, Uri};
 use pin_project_lite::pin_project;
 use serde::Serialize;
 use serde_json::Value;
@@ -27,10 +26,10 @@ use std::{
     convert::Infallible,
     fmt,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{broadcast, mpsc};
 
 // ---------------------------------------------------------------------------
 // Shared state
@@ -41,7 +40,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 /// Links incoming POST events to active SSE streams via unique connection IDs.
 #[derive(Clone)]
 pub struct LiveViewSseState {
-    inner: Arc<RwLock<HashMap<ConnectionId, ConnectionHandle>>>,
+    inner: Arc<Mutex<HashMap<ConnectionId, ConnectionHandle>>>,
 }
 
 impl fmt::Debug for LiveViewSseState {
@@ -64,20 +63,20 @@ impl LiveViewSseState {
     /// Create a new, empty SSE connection state.
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(HashMap::new())),
+            inner: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub(crate) async fn insert(&self, id: ConnectionId, handle: ConnectionHandle) {
-        self.inner.write().await.insert(id, handle);
+    pub(crate) fn insert(&self, id: ConnectionId, handle: ConnectionHandle) {
+        self.inner.lock().unwrap().insert(id, handle);
     }
 
-    pub(crate) async fn remove(&self, id: &ConnectionId) -> Option<ConnectionHandle> {
-        self.inner.write().await.remove(id)
+    pub(crate) fn remove(&self, id: &ConnectionId) -> Option<ConnectionHandle> {
+        self.inner.lock().unwrap().remove(id)
     }
 
-    pub(crate) async fn get(&self, id: &ConnectionId) -> Option<ConnectionHandle> {
-        self.inner.read().await.get(id).cloned()
+    pub(crate) fn get(&self, id: &ConnectionId) -> Option<ConnectionHandle> {
+        self.inner.lock().unwrap().get(id).cloned()
     }
 }
 
@@ -95,6 +94,7 @@ impl Default for LiveViewSseState {
 #[derive(Clone, Debug)]
 pub(crate) struct ConnectionHandle {
     pub(crate) event_tx: mpsc::Sender<RawSseEvent>,
+    #[allow(dead_code)]
     pub(crate) update_tx: broadcast::Sender<SseServerMessage>,
 }
 
@@ -211,7 +211,7 @@ pub(crate) async fn run_sse_connection<L>(
 
     if let Err(err) = view_task.mount(uri, headers, view_handle).await {
         tracing::error!(%err, "failed to mount SSE view");
-        state.remove(&connection_id).await;
+        state.remove(&connection_id);
         return;
     }
 
@@ -225,13 +225,13 @@ pub(crate) async fn run_sse_connection<L>(
         }
         Err(err) => {
             tracing::error!(%err, "failed to render SSE view");
-            state.remove(&connection_id).await;
+            state.remove(&connection_id);
             return;
         }
     }
 
     loop {
-        if state.get(&connection_id).await.is_none() {
+        if state.get(&connection_id).is_none() {
             break;
         }
 
@@ -266,7 +266,7 @@ pub(crate) async fn run_sse_connection<L>(
         }
     }
 
-    state.remove(&connection_id).await;
+    state.remove(&connection_id);
 }
 
 async fn process_raw_event<M>(
@@ -346,6 +346,101 @@ fn broadcast_update(update_tx: &broadcast::Sender<SseServerMessage>, response: U
 // SSE stream type
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// High-level setup
+// ---------------------------------------------------------------------------
+
+/// Enable live-view SSE support on a router.
+///
+/// Wraps the given router, adding:
+/// - A `/_sse` POST route for receiving client events over SSE
+/// - An `Extension` layer with `LiveViewSseState` so [`LiveViewUpgrade`] can
+///   detect SSE requests
+///
+/// [`LiveViewUpgrade`]: crate::LiveViewUpgrade
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use axum::{Router, routing::get};
+/// use axum_live_view::LiveViewUpgrade;
+///
+/// let app = axum_live_view::setup(
+///     Router::new()
+///         .route("/", get(root))
+///         .route("/bundle.js", axum_live_view::precompiled_js())
+/// );
+/// ```
+pub fn setup(router: axum::Router) -> axum::Router {
+    use axum::Extension;
+    use std::sync::Arc;
+
+    let sse = Arc::new(LiveViewSseState::new());
+    router
+        .route("/_sse", axum::routing::post(event_handler))
+        .layer(Extension(sse))
+}
+
+// ---------------------------------------------------------------------------
+// POST event handler
+// ---------------------------------------------------------------------------
+
+/// Axum handler for receiving SSE events from the client.
+///
+/// The JavaScript client sends POST requests to `/_sse` with
+/// `x-live-view-event: true` and `x-live-view-id: <connection-id>` headers
+/// when WebSocket transport is unavailable.
+///
+/// This route is automatically registered by [`setup`].
+pub(crate) async fn event_handler(
+    axum::Extension(sse): axum::Extension<Arc<LiveViewSseState>>,
+    headers: HeaderMap,
+    body: bytes::Bytes,
+) -> Response {
+    let connection_id = match headers
+        .get("x-live-view-id")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(id) => ConnectionId(id.to_owned()),
+        None => return (StatusCode::BAD_REQUEST, "missing x-live-view-id header").into_response(),
+    };
+
+    let payload: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")).into_response();
+        }
+    };
+
+    let raw_event = RawSseEvent {
+        msg: payload
+            .get("m")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned(),
+        event_type: payload
+            .get("t")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned(),
+        data: payload.get("d").cloned(),
+    };
+
+    let handle = match sse.get(&connection_id) {
+        Some(h) => h,
+        None => return (StatusCode::NOT_FOUND, "unknown connection id").into_response(),
+    };
+
+    match handle.event_tx.send(raw_event).await {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(_) => (StatusCode::GONE, "connection closed").into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SSE stream type
+// ---------------------------------------------------------------------------
+
 pin_project! {
     pub(crate) struct SseStream {
         #[pin]
@@ -359,7 +454,7 @@ pin_project! {
             let state = this.state.clone();
             let connection_id = this.connection_id.clone();
             tokio::spawn(async move {
-                state.remove(&connection_id).await;
+                state.remove(&connection_id);
             });
         }
     }

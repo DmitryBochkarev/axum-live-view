@@ -1,43 +1,33 @@
-//! Counter example using `page::live_view_page`.
+//! Counter example demonstrating SSE transport via `LiveViewUpgrade`.
 //!
-//! All transport modes (HTML, WebSocket, SSE) are served from the same route.
+//! SSE transport requires:
+//! 1. `LiveViewSseState` in extensions
+//! 2. `sse::event_handler()` for the POST route (client → server events)
+//! 3. The JS client sends `Accept: text/event-stream` to enable SSE mode
+//!
 //! Run with:
 //! ```sh
 //! cargo run -p example-counter-sse
 //! ```
 
-use axum::{Extension, Router};
+use axum::{Router, response::IntoResponse, routing::get};
 use axum_live_view::{
     event_data::EventData, html, live_view::Updated,
-    page, sse::LiveViewSseState, Html, LiveView,
+    LiveViewUpgrade, Html, LiveView,
 };
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let sse = Arc::new(LiveViewSseState::new());
-
-    let app = Router::new()
-        .merge(page::live_view_page("/", |embed| {
-            html! {
-                <!DOCTYPE html>
-                <html>
-                    <head>
-                        <meta name="live-view-transport" content="sse"></meta>
-                    </head>
-                    <body>
-                        { embed.embed(Counter::default()) }
-                        <script src="/bundle.js"></script>
-                    </body>
-                </html>
-            }
-        }))
-        .route("/bundle.js", axum_live_view::precompiled_js())
-        .layer(Extension(sse));
+    let app = axum_live_view::setup(
+        Router::new()
+            .route("/", get(root))
+            .route("/bundle.js", axum_live_view::precompiled_js())
+    );
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -47,6 +37,23 @@ async fn main() {
     let listener = TcpListener::bind(addr).await.unwrap();
     println!("listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
+    live.response(|embed| {
+        html! {
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <meta name="live-view-transport" content="sse"></meta>
+                </head>
+                <body>
+                    { embed.embed(Counter::default()) }
+                    <script src="/bundle.js"></script>
+                </body>
+            </html>
+        }
+    })
 }
 
 #[derive(Default, Clone)]
