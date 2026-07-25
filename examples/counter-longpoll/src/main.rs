@@ -47,7 +47,7 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
             <html>
                 <head>
                     // Force long-poll transport via meta tag
-                    <meta name="live-view-transport" content="longpoll">
+                    <meta name="live-view-transport" content="longpoll" />
                 </head>
                 <body>
                     { embed.embed(Counter::default()) }

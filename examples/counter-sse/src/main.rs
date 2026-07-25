@@ -44,7 +44,7 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
             <!DOCTYPE html>
             <html>
                 <head>
-                    <meta name="live-view-transport" content="sse"></meta>
+                    <meta name="live-view-transport" content="sse" />
                 </head>
                 <body>
                     { embed.embed(Counter::default()) }
