@@ -81,7 +81,7 @@ function connect(options: LiveViewOptions) {
     // WebSocket only — no fallback
     connectWs(options, () => {
       // WebSocket failed and no fallback is allowed; retry after delay
-      setTimeout(() => connect(options), 1000)
+      scheduleReconnect(options)
     })
   } else if (preference === "longpoll") {
     // Long-poll only — skip WS and SSE entirely
@@ -100,6 +100,18 @@ function connect(options: LiveViewOptions) {
 // WebSocket transport
 // ---------------------------------------------------------------------------
 
+var reconnectTimeoutId: number | null = null
+
+function scheduleReconnect(options: LiveViewOptions) {
+  if (reconnectTimeoutId !== null) {
+    clearTimeout(reconnectTimeoutId)
+  }
+  reconnectTimeoutId = setTimeout(() => {
+    reconnectTimeoutId = null
+    connect(options)
+  }, 1000)
+}
+
 function connectWs(options: LiveViewOptions, onFallback: () => void) {
   var proto: string
   if (location.protocol.indexOf("https") === -1) {
@@ -111,10 +123,20 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
   const url = `${proto}://${window.location.host}${window.location.pathname}`
   const socket = new WebSocket(url)
   var state: State = {}
+  var didOpen = false
   var fallbackCalled = false
   var transport: Transport | null = null
+  var heartbeatInterval: number | null = null
+
+  function clearHeartbeat() {
+    if (heartbeatInterval !== null) {
+      clearInterval(heartbeatInterval)
+      heartbeatInterval = null
+    }
+  }
 
   socket.addEventListener("open", () => {
+    didOpen = true
     // WebSocket connected successfully
     const container = document.getElementById("live-view-container")
     if (container) {
@@ -131,7 +153,7 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
     }
 
     // Heartbeat
-    setInterval(() => {
+    heartbeatInterval = setInterval(() => {
       const msg: MessageToView = { t: "h" }
       if (options.debug) {
         console.time(pingTimeLabel)
@@ -149,24 +171,23 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
   })
 
   socket.addEventListener("close", () => {
+    clearHeartbeat()
     const container = document.getElementById("live-view-container")
     if (container) {
       container.removeAttribute("data-lv-connected")
     }
-    if (!fallbackCalled) {
+    if (!didOpen && !fallbackCalled) {
       fallbackCalled = true
       // WS failed at connection time — fall back to SSE
       onFallback()
     } else {
-      // Reconnection after a successful session — retry WS
-      setTimeout(() => {
-        connect(options)
-      }, 1000)
+      // Reconnection after a successful session or after fallback failed
+      scheduleReconnect(options)
     }
   })
 
   socket.addEventListener("error", () => {
-    if (!fallbackCalled && socket.readyState === WebSocket.CLOSED) {
+    if (!fallbackCalled && !didOpen) {
       fallbackCalled = true
       onFallback()
     }
@@ -182,9 +203,7 @@ var sseHeartbeatInterval: number | null = null
 function connectSse(options: LiveViewOptions) {
   connectSseInner(options, () => {
     // SSE failed — reconnect after a delay (retry WS first)
-    setTimeout(() => {
-      connect(options)
-    }, 1000)
+    scheduleReconnect(options)
   })
 }
 
@@ -262,9 +281,7 @@ function connectSseInner(options: LiveViewOptions, onError: () => void) {
       return
     }
     // Reconnect after a delay
-    setTimeout(() => {
-      connect(options)
-    }, 1000)
+    scheduleReconnect(options)
   })
 }
 
@@ -361,9 +378,7 @@ function connectLongPoll(options: LiveViewOptions) {
         container.removeAttribute("data-lv-connected")
       }
       // Retry after a delay
-      setTimeout(() => {
-        connect(options)
-      }, 3000)
+      scheduleReconnect(options)
     })
 }
 
@@ -420,9 +435,7 @@ function startLongPollLoop(options: LiveViewOptions, state: State) {
           longPollHeartbeatInterval = null
         }
         // Reconnect after a delay
-        setTimeout(() => {
-          connect(options)
-        }, 3000)
+        scheduleReconnect(options)
       })
   }
 
