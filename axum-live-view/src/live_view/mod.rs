@@ -426,7 +426,7 @@ impl std::error::Error for ViewHandleSendError {}
 /// enum BarMsg {}
 ///
 /// async fn handle(live: LiveViewUpgrade) -> impl IntoResponse {
-///     live.response(|embed_live_view| {
+///     live.response(|embed_live_view| async move {
 ///         // instantiate each view
 ///         let foo = Foo {};
 ///         let bar = Bar {};
@@ -446,7 +446,7 @@ impl std::error::Error for ViewHandleSendError {}
 ///         html! {
 ///             { embed_live_view.embed(combined_view) }
 ///         }
-///     })
+///     }).await
 /// }
 /// ```
 pub fn combine<V, F>(views: V, render: F) -> combine::Combine<V, F> {

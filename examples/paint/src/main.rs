@@ -32,7 +32,7 @@ async fn main() {
 async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
     let view = PaintView::default();
 
-    live.response(move |embed| {
+    live.response(move |embed| async move {
         html! {
             <!DOCTYPE html>
             <html>
@@ -47,7 +47,7 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                 </body>
             </html>
         }
-    })
+    }).await
 }
 
 const STYLE_SHEET: &str = r#"

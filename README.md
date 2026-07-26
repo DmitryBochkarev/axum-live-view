@@ -61,7 +61,7 @@ async fn root(
     // `Counter` is our live view and we initialize it with the default values.
     let counter = Counter::default();
 
-    live.response(|embed_live_view| {
+    live.response(|embed_live_view| async move {
         html! {
             <!DOCTYPE html>
             <html>
@@ -80,7 +80,7 @@ async fn root(
                 </body>
             </html>
         }
-    })
+    }).await
 }
 
 // Our live view is just a regular Rust struct...

@@ -21,17 +21,17 @@ use std::{fmt, marker::PhantomData};
 use tokio::sync::{mpsc, oneshot};
 
 /// Type used to embed live views in HTML templates.
-pub struct EmbedLiveView<'a, L> {
-    view: Option<&'a mut Option<L>>,
+pub struct EmbedLiveView<L> {
+    tx: Option<std::sync::mpsc::Sender<L>>,
 }
 
-impl<'a, L> EmbedLiveView<'a, L> {
+impl<L> EmbedLiveView<L> {
     pub(crate) fn noop() -> Self {
-        Self { view: None }
+        Self { tx: None }
     }
 
-    pub(crate) fn new(view: &'a mut Option<L>) -> Self {
-        Self { view: Some(view) }
+    pub(crate) fn new(tx: std::sync::mpsc::Sender<L>) -> Self {
+        Self { tx: Some(tx) }
     }
 
     /// Embed a live view in a HTML template.
@@ -41,8 +41,8 @@ impl<'a, L> EmbedLiveView<'a, L> {
     {
         let html = wrap_in_live_view_container(view.render());
 
-        if let Some(view_handle) = self.view {
-            *view_handle = Some(view);
+        if let Some(tx) = self.tx {
+            let _ = tx.send(view);
         }
 
         html
@@ -54,11 +54,11 @@ impl<'a, L> EmbedLiveView<'a, L> {
     /// view life cycle we're in. See the [root module docs](crate) for more details on the life
     /// cycle.
     pub fn connected(&self) -> bool {
-        self.view.is_some()
+        self.tx.is_some()
     }
 }
 
-impl<'a, M> fmt::Debug for EmbedLiveView<'a, M> {
+impl<M> fmt::Debug for EmbedLiveView<M> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EmbedLiveView").finish()
     }

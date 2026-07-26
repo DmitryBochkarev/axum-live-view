@@ -155,6 +155,9 @@ impl LiveViewUpgrade {
     /// - Long-poll (`Accept: text/x-live-view-longpoll`) → opens a
     ///   long-polling response with initial render + connection ID
     ///
+    /// The `gather_view` closure may be async, allowing you to perform
+    /// async work (e.g. database queries) before the initial render.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -166,7 +169,7 @@ impl LiveViewUpgrade {
     /// use std::convert::Infallible;
     ///
     /// async fn handler(live: LiveViewUpgrade) -> impl IntoResponse {
-    ///     live.response(|embed_live_view| {
+    ///     live.response(|embed_live_view| async move {
     ///         html! {
     ///           { embed_live_view.embed(MyView::default()) }
     ///
@@ -175,7 +178,7 @@ impl LiveViewUpgrade {
     ///           // by axum_live_view::setup().
     ///           <script src="/_live_view.js"></script>
     ///         }
-    ///     })
+    ///     }).await
     /// }
     ///
     /// #[derive(Default)]
@@ -201,25 +204,26 @@ impl LiveViewUpgrade {
     /// ```
     ///
     /// See the [root module docs](crate) for a more complete example.
-    pub fn response<F, L>(self, gather_view: F) -> Response
+    pub async fn response<F, Fut, L>(self, gather_view: F) -> Response
     where
         L: LiveView,
-        F: FnOnce(EmbedLiveView<'_, L>) -> Html<L::Message>,
+        F: FnOnce(EmbedLiveView<L>) -> Fut,
+        Fut: std::future::Future<Output = Html<L::Message>>,
     {
         match self.inner {
             LiveViewUpgradeInner::Http => {
                 let embed = EmbedLiveView::noop();
-                gather_view(embed).into_response()
+                gather_view(embed).await.into_response()
             }
             LiveViewUpgradeInner::Ws(data) => {
                 let (ws, uri, headers) = *data;
-                let mut view = None;
+                let (tx, rx) = std::sync::mpsc::channel();
 
-                let embed = EmbedLiveView::new(&mut view);
+                let embed = EmbedLiveView::new(tx);
 
-                gather_view(embed);
+                gather_view(embed).await;
 
-                if let Some(view) = view {
+                if let Ok(view) = rx.try_recv() {
                     ws.on_upgrade(|socket| run_view_on_socket(socket, view, uri, headers))
                         .into_response()
                 } else {
@@ -227,19 +231,28 @@ impl LiveViewUpgrade {
                 }
             }
             LiveViewUpgradeInner::Sse { uri, headers, sse } => {
-                sse_stream_response::<L, F>(sse, gather_view, uri, headers)
+                sse_stream_response::<L, F, Fut>(sse, gather_view, uri, headers).await
             }
             LiveViewUpgradeInner::LongPoll {
                 uri,
                 headers,
                 sse,
                 lp_connections,
-            } => long_poll_response::<L, F>(sse, lp_connections, gather_view, uri, headers),
+            } => {
+                long_poll_response::<L, F, Fut>(
+                    sse,
+                    lp_connections,
+                    gather_view,
+                    uri,
+                    headers,
+                )
+                .await
+            }
         }
     }
 }
 
-fn sse_stream_response<L, F>(
+async fn sse_stream_response<L, F, Fut>(
     sse: ConnectionRegistry,
     gather_view: F,
     uri: Uri,
@@ -247,16 +260,17 @@ fn sse_stream_response<L, F>(
 ) -> Response
 where
     L: LiveView,
-    F: FnOnce(EmbedLiveView<'_, L>) -> Html<L::Message>,
+    F: FnOnce(EmbedLiveView<L>) -> Fut,
+    Fut: std::future::Future<Output = Html<L::Message>>,
 {
     let connection_id = crate::transport::new_connection_id();
     let conn_id = ConnectionId(connection_id);
 
-    let mut view = None;
-    let embed = EmbedLiveView::new(&mut view);
-    gather_view(embed);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let embed = EmbedLiveView::new(tx);
+    gather_view(embed).await;
 
-    let Some(view) = view else {
+    let Ok(view) = rx.try_recv() else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "LiveViewUpgrade: embed() was not called",
@@ -321,7 +335,7 @@ where
 ///    the initial render.
 /// 2. **Subsequent poll** (has `x-live-view-id` header): looks up the
 ///    existing connection and waits for new messages (or timeout).
-fn long_poll_response<L, F>(
+async fn long_poll_response<L, F, Fut>(
     sse: ConnectionRegistry,
     lp_connections: LongPollConnections,
     gather_view: F,
@@ -330,7 +344,8 @@ fn long_poll_response<L, F>(
 ) -> Response
 where
     L: LiveView,
-    F: FnOnce(EmbedLiveView<'_, L>) -> Html<L::Message>,
+    F: FnOnce(EmbedLiveView<L>) -> Fut,
+    Fut: std::future::Future<Output = Html<L::Message>>,
 {
     // Subsequent poll — look up existing connection
     if let Some(conn_id_str) = headers
@@ -372,11 +387,11 @@ where
     }
 
     // Initial poll — create the view and spawn the background task
-    let mut view = None;
-    let embed = EmbedLiveView::new(&mut view);
-    gather_view(embed);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let embed = EmbedLiveView::new(tx);
+    gather_view(embed).await;
 
-    let Some(view) = view else {
+    let Ok(view) = rx.try_recv() else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "LiveViewUpgrade: embed() was not called",

@@ -41,7 +41,7 @@ async fn main() {
 }
 
 async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
-    live.response(|embed| {
+    live.response(|embed| async move {
         html! {
             <!DOCTYPE html>
             <html>
@@ -55,7 +55,7 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                 </body>
             </html>
         }
-    })
+    }).await
 }
 
 #[derive(Default, Clone)]

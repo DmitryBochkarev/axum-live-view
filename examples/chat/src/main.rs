@@ -76,7 +76,7 @@ async fn root(
         }
     });
 
-    live.response(move |embed| {
+    live.response(move |embed| async move {
         html! {
             <!DOCTYPE html>
             <html>
@@ -88,7 +88,7 @@ async fn root(
                 </body>
             </html>
         }
-    })
+    }).await
 }
 
 struct MessagesList {
