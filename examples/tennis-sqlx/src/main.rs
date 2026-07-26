@@ -21,16 +21,14 @@ use tokio::{net::TcpListener, sync::broadcast};
 // ---------------------------------------------------------------------------
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Set up the SQLite database. Uses a file so data persists across restarts.
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:tennis.db".to_owned());
-    let options: SqliteConnectOptions = db_url.parse().expect("invalid database URL");
-    let pool = SqlitePool::connect_with(options.create_if_missing(true))
-        .await
-        .expect("failed to connect to database");
-    init_db(&pool).await;
+    let options: SqliteConnectOptions = db_url.parse()?;
+    let pool = SqlitePool::connect_with(options.create_if_missing(true)).await?;
+    init_db(&pool).await?;
 
     let (tx, _) = broadcast::channel::<RefreshPing>(1024);
 
@@ -51,15 +49,17 @@ async fn main() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3000);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = TcpListener::bind(addr).await?;
+    tracing::info!("listening on http://{}", addr);
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Database helpers
 // ---------------------------------------------------------------------------
 
-async fn init_db(pool: &SqlitePool) {
+async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,25 +71,24 @@ async fn init_db(pool: &SqlitePool) {
         )",
     )
     .execute(pool)
-    .await
-    .expect("failed to create matches table");
+    .await?;
+    Ok(())
 }
 
-async fn fetch_matches(db: &SqlitePool) -> Vec<Match> {
+async fn fetch_matches(db: &SqlitePool) -> Result<Vec<Match>, sqlx::Error> {
     sqlx::query_as::<_, Match>(
         "SELECT id, player_1_name, player_1_points, player_2_name, player_2_points, finished
          FROM matches ORDER BY id DESC",
     )
     .fetch_all(db)
     .await
-    .expect("failed to fetch matches")
 }
 
 // ---------------------------------------------------------------------------
 // Shared application state
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct AppState {
     db: SqlitePool,
     tx: broadcast::Sender<RefreshPing>,
@@ -120,14 +119,9 @@ struct Match {
 
 /// Admin page – create matches, add points.
 async fn root(live: LiveViewUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    println!("TennisApp root request");
-    let db = state.db.clone();
-    let tx = state.tx.clone();
     live.response(|embed| async move {
-        println!("TennisApp root response render");
-
-        let mut view = TennisApp::new(db, tx);
-        view.matches = fetch_matches(&view.db).await;
+        let mut view = TennisApp::new(state);
+        view.matches = fetch_matches(&view.state.db).await.unwrap_or_default();
 
         html! {
             <!DOCTYPE html>
@@ -159,12 +153,9 @@ async fn root(live: LiveViewUpgrade, State(state): State<AppState>) -> impl Into
 
 /// Read-only observer page – see scores update in real time, no controls.
 async fn observe(live: LiveViewUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    let db = state.db.clone();
-    let tx = state.tx.clone();
-
     live.response(|embed| async move {
-        let mut view = ObserverApp::new(db, tx);
-        view.matches = fetch_matches(&view.db).await;
+        let mut view = ObserverApp::new(state);
+        view.matches = fetch_matches(&view.state.db).await.unwrap_or_default();
 
         html! {
             <!DOCTYPE html>
@@ -225,8 +216,7 @@ async fn ms_sans_serif_woff2() -> impl IntoResponse {
 
 #[derive(Clone, Debug)]
 struct TennisApp {
-    db: SqlitePool,
-    tx: broadcast::Sender<RefreshPing>,
+    state: AppState,
     /// Local snapshot of all matches for `render`.
     matches: Vec<Match>,
     player_1: String,
@@ -234,10 +224,9 @@ struct TennisApp {
 }
 
 impl TennisApp {
-    fn new(db: SqlitePool, tx: broadcast::Sender<RefreshPing>) -> Self {
+    fn new(state: AppState) -> Self {
         Self {
-            db,
-            tx,
+            state,
             matches: Vec::new(),
             player_1: String::new(),
             player_2: String::new(),
@@ -262,15 +251,8 @@ impl LiveView for TennisApp {
         _request_headers: &HeaderMap,
         handle: ViewHandle<Self::Message>,
     ) {
-        // Subscribe to global refresh pings.
-        let mut rx = self.tx.subscribe();
-        // let db = self.db.clone();
+        let mut rx = self.state.tx.subscribe();
         tokio::spawn(async move {
-            // let matches = fetch_matches(&db).await;
-            // if handle.send(Msg::MatchesList(matches)).await.is_err() {
-            //     return;
-            // }
-
             while let Ok(RefreshPing) = rx.recv().await {
                 if handle.send(Msg::Refresh).await.is_err() {
                     break;
@@ -280,15 +262,19 @@ impl LiveView for TennisApp {
     }
 
     fn update(mut self, msg: Msg, data: Option<EventData>) -> Updated<Self> {
-        println!("TennisApp: {:?}", msg);
         match msg {
             Msg::Noop => {}
 
             Msg::Refresh => {
-                let db = self.db.clone();
+                let db = self.state.db.clone();
                 return Updated::new(self).spawn(async move {
-                    let matches = fetch_matches(&db).await;
-                    Msg::MatchesList(matches)
+                    match fetch_matches(&db).await {
+                        Ok(matches) => Msg::MatchesList(matches),
+                        Err(e) => {
+                            tracing::error!("failed to fetch matches: {e}");
+                            Msg::Noop
+                        }
+                    }
                 });
             }
 
@@ -316,31 +302,33 @@ impl LiveView for TennisApp {
                         self.player_1.clear();
                         self.player_2.clear();
 
-                        let tx = self.tx.clone();
-                        let db = self.db.clone();
-                        let updated = Updated::new(self).spawn(async move {
-                            sqlx::query(
+                        let tx = self.state.tx.clone();
+                        let db = self.state.db.clone();
+                        return Updated::new(self).spawn(async move {
+                            if let Err(e) = sqlx::query(
                                 "INSERT INTO matches (player_1_name, player_2_name) VALUES (?, ?)",
                             )
                             .bind(&p1)
                             .bind(&p2)
                             .execute(&db)
                             .await
-                            .expect("failed to insert match");
+                            {
+                                tracing::error!("failed to insert match: {e}");
+                                return Msg::Noop;
+                            }
 
-                            let _ = &tx.send(RefreshPing);
+                            let _ = tx.send(RefreshPing);
 
                             Msg::Noop
                         });
-                        return updated;
                     }
                 }
             }
             Msg::AddPoint(id, player_num) => {
-                let tx = self.tx.clone();
-                let db = self.db.clone();
-                let updated = Updated::new(self).spawn(async move {
-                    match player_num {
+                let tx = self.state.tx.clone();
+                let db = self.state.db.clone();
+                return Updated::new(self).spawn(async move {
+                    let result = match player_num {
                         PlayerNum::One => sqlx::query(
                             "UPDATE matches SET player_1_points = player_1_points + 1 WHERE id = ?",
                         )
@@ -353,26 +341,30 @@ impl LiveView for TennisApp {
                         .bind(id)
                         .execute(&db)
                         .await,
+                    };
+                    if let Err(e) = result {
+                        tracing::error!("failed to update points: {e}");
+                        return Msg::Noop;
                     }
-                    .expect("failed to update points");
                     let _ = tx.send(RefreshPing);
                     Msg::Noop
                 });
-                return updated;
             }
             Msg::FinishMatch(id) => {
-                let db = self.db.clone();
-                let tx = self.tx.clone();
-                let updated = Updated::new(self).spawn(async move {
-                    sqlx::query("UPDATE matches SET finished = 1 WHERE id = ?")
+                let db = self.state.db.clone();
+                let tx = self.state.tx.clone();
+                return Updated::new(self).spawn(async move {
+                    if let Err(e) = sqlx::query("UPDATE matches SET finished = 1 WHERE id = ?")
                         .bind(id)
                         .execute(&db)
                         .await
-                        .expect("failed to finish match");
+                    {
+                        tracing::error!("failed to finish match: {e}");
+                        return Msg::Noop;
+                    }
                     let _ = tx.send(RefreshPing);
                     Msg::Noop
                 });
-                return updated;
             }
             Msg::MatchesList(items) => self.matches = items,
         }
@@ -475,16 +467,14 @@ impl LiveView for TennisApp {
 
 #[derive(Clone, Debug)]
 struct ObserverApp {
-    db: SqlitePool,
-    tx: broadcast::Sender<RefreshPing>,
+    state: AppState,
     matches: Vec<Match>,
 }
 
 impl ObserverApp {
-    fn new(db: SqlitePool, tx: broadcast::Sender<RefreshPing>) -> Self {
+    fn new(state: AppState) -> Self {
         Self {
-            db,
-            tx,
+            state,
             matches: Vec::new(),
         }
     }
@@ -499,7 +489,7 @@ impl LiveView for ObserverApp {
         _request_headers: &HeaderMap,
         handle: ViewHandle<Self::Message>,
     ) {
-        let mut rx = self.tx.subscribe();
+        let mut rx = self.state.tx.subscribe();
         tokio::spawn(async move {
             while let Ok(RefreshPing) = rx.recv().await {
                 if handle.send(ObserverMsg::Refresh).await.is_err() {
@@ -512,12 +502,16 @@ impl LiveView for ObserverApp {
     fn update(mut self, msg: ObserverMsg, _data: Option<EventData>) -> Updated<Self> {
         match msg {
             ObserverMsg::Refresh => {
-                let db = self.db.clone();
-                let updated = Updated::new(self).spawn(async move {
-                    let matches = fetch_matches(&db).await;
-                    ObserverMsg::MatchesList(matches)
+                let db = self.state.db.clone();
+                return Updated::new(self).spawn(async move {
+                    match fetch_matches(&db).await {
+                        Ok(matches) => ObserverMsg::MatchesList(matches),
+                        Err(e) => {
+                            tracing::error!("failed to fetch matches: {e}");
+                            ObserverMsg::MatchesList(Vec::new())
+                        }
+                    }
                 });
-                return updated;
             }
             ObserverMsg::MatchesList(items) => self.matches = items,
         }
@@ -624,7 +618,7 @@ mod tests {
         let pool = SqlitePool::connect("sqlite::memory:")
             .await
             .expect("failed to create test pool");
-        init_db(&pool).await;
+        init_db(&pool).await.expect("failed to init test db");
         pool
     }
 
@@ -649,7 +643,9 @@ mod tests {
     async fn initial_render() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(TennisApp::new(pool, tx)).mount().await;
+        let view = run_live_view(TennisApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
         let html = view.render().await;
 
         assert!(html.contains("Tennis Matches"));
@@ -660,7 +656,9 @@ mod tests {
     async fn form_input_updates_player_names() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(TennisApp::new(pool, tx)).mount().await;
+        let view = run_live_view(TennisApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
 
         view.send(Msg::Player1Input, input_event("Roger")).await;
         let (html, _) = view.send(Msg::Player2Input, input_event("Rafa")).await;
@@ -672,7 +670,9 @@ mod tests {
     async fn submit_button_enabled_only_when_form_valid() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(TennisApp::new(pool, tx)).mount().await;
+        let view = run_live_view(TennisApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
 
         assert!(view.render().await.contains("disabled"));
 
@@ -687,7 +687,9 @@ mod tests {
     async fn create_match() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(TennisApp::new(pool, tx)).mount().await;
+        let view = run_live_view(TennisApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
 
         view.send(Msg::Player1Input, input_event("Roger")).await;
         view.send(Msg::Player2Input, input_event("Rafa")).await;
@@ -704,7 +706,9 @@ mod tests {
     async fn add_point_to_player() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(TennisApp::new(pool, tx)).mount().await;
+        let view = run_live_view(TennisApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
 
         view.send(Msg::Player1Input, input_event("Roger")).await;
         view.send(Msg::Player2Input, input_event("Rafa")).await;
@@ -722,7 +726,9 @@ mod tests {
     async fn finish_match() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(TennisApp::new(pool, tx)).mount().await;
+        let view = run_live_view(TennisApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
 
         view.send(Msg::Player1Input, input_event("Roger")).await;
         view.send(Msg::Player2Input, input_event("Rafa")).await;
@@ -738,11 +744,12 @@ mod tests {
     async fn two_views_share_state() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
+        let state = AppState { db: pool, tx };
 
-        let h1 = run_live_view(TennisApp::new(pool.clone(), tx.clone()))
+        let h1 = run_live_view(TennisApp::new(state.clone()))
             .mount()
             .await;
-        let h2 = run_live_view(TennisApp::new(pool.clone(), tx.clone()))
+        let h2 = run_live_view(TennisApp::new(state.clone()))
             .mount()
             .await;
 
@@ -766,7 +773,9 @@ mod tests {
     async fn observer_shows_empty_state() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
-        let view = run_live_view(ObserverApp::new(pool, tx)).mount().await;
+        let view = run_live_view(ObserverApp::new(AppState { db: pool, tx }))
+            .mount()
+            .await;
         let html = view.render().await;
 
         assert!(html.contains("No matches in progress."));
@@ -776,11 +785,12 @@ mod tests {
     async fn observer_sees_match_created_by_admin() {
         let pool = test_pool().await;
         let (tx, _) = broadcast::channel(1024);
+        let state = AppState { db: pool, tx };
 
-        let admin = run_live_view(TennisApp::new(pool.clone(), tx.clone()))
+        let admin = run_live_view(TennisApp::new(state.clone()))
             .mount()
             .await;
-        let obs = run_live_view(ObserverApp::new(pool.clone(), tx.clone()))
+        let obs = run_live_view(ObserverApp::new(state.clone()))
             .mount()
             .await;
 
