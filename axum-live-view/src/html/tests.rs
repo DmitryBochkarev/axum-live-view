@@ -300,8 +300,8 @@ fn match_() {
     let view: Html<()> = html! {
         <div>
             match name {
-                Some(name) => <p>{ format!("Hi {}", name) }</p>,
-                None => <p>"Missing name..."</p>,
+                Some(name) => html! { <p>{ format!("Hi {}", name) }</p> },
+                None => html! { <p>"Missing name..."</p> },
             }
         </div>
     };
@@ -314,9 +314,9 @@ fn match_guard() {
     let view: Html<()> = html! {
         <div>
             match count {
-                Some(count) if count == 0 => <p>"its zero!"</p>,
-                Some(count) => <p>{ count }</p>,
-                None => <p>"Missing count..."</p>,
+                Some(count) if count == 0 => html! { <p>"its zero!"</p> },
+                Some(count) => html! { <p>{ count }</p> },
+                None => html! { <p>"Missing count..."</p> },
             }
         </div>
     };
@@ -877,8 +877,8 @@ fn starting_with_dynamic() {
 fn match_with_blocks() {
     let view: Html<()> = html! {
         match Some(()) {
-            Some(()) => { "one" },
-            None => { "two" },
+            Some(()) => html! { "one" },
+            None => html! { "two" },
         }
     };
     assert_eq!(view.render(), "one");

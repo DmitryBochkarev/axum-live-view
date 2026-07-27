@@ -499,7 +499,7 @@ impl Parse for Match {
 struct Arm {
     pat: syn::Pat,
     guard: Option<syn::Expr>,
-    tree: Tree,
+    body: syn::Expr,
 }
 
 impl Parse for Arm {
@@ -515,25 +515,14 @@ impl Parse for Arm {
 
         input.parse::<Token![=>]>()?;
 
-        let mut nodes = Vec::new();
-        let content;
-        let x = if input.peek(syn::token::Brace) {
-            syn::braced!(content in input);
-            &content
-        } else {
-            input
-        };
-        while x.fork().parse::<HtmlNode>().is_ok() {
-            let node = x.parse::<HtmlNode>()?;
-            nodes.push(node);
-        }
+        let body = input.parse::<syn::Expr>()?;
 
         input.parse::<Token![,]>()?;
 
         Ok(Self {
             pat,
             guard,
-            tree: Tree { nodes },
+            body,
         })
     }
 }
@@ -864,10 +853,10 @@ impl NodeToTokens for Match {
 
         let arms = arms
             .iter()
-            .map(|Arm { pat, guard, tree }| {
+            .map(|Arm { pat, guard, body }| {
                 let guard = guard.as_ref().map(|guard| quote! { if #guard });
                 quote! {
-                    #pat #guard => __dynamic.push_fragment(#tree),
+                    #pat #guard => __dynamic.push_fragment(#body),
                 }
             })
             .collect::<TokenStream>();

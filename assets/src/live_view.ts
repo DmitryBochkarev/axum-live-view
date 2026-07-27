@@ -30,6 +30,27 @@ interface State {
 }
 
 // ---------------------------------------------------------------------------
+// Active connection tracking — ensures only one transport is active at a time
+// ---------------------------------------------------------------------------
+
+var activeDisconnect: (() => void) | null = null
+var connectionInProgress = false
+
+/// Register a transport's full cleanup function as the active connection.
+/// Automatically disconnects any previously-active transport first.
+function registerActiveConnection(disconnect: () => void) {
+  if (activeDisconnect) {
+    activeDisconnect()
+    activeDisconnect = null
+  }
+  activeDisconnect = disconnect
+}
+
+function clearActiveConnection() {
+  activeDisconnect = null
+}
+
+// ---------------------------------------------------------------------------
 // Transport abstraction
 // ---------------------------------------------------------------------------
 
@@ -72,6 +93,29 @@ function connect(options: LiveViewOptions) {
     return
   }
 
+  // Prevent concurrent connection attempts — if we're already in the
+  // middle of connecting, let that attempt finish (or fail) before
+  // starting a new one.
+  if (connectionInProgress) {
+    return
+  }
+
+  // Disconnect any previous transport before starting a new connection.
+  // This is critical to prevent multiple transports (WS + SSE, etc.)
+  // from running simultaneously and fighting over the DOM.
+  if (activeDisconnect) {
+    activeDisconnect()
+    activeDisconnect = null
+  }
+
+  // Remove connected marker while reconnecting
+  const connectedContainer = document.getElementById("live-view-container")
+  if (connectedContainer) {
+    connectedContainer.removeAttribute("data-lv-connected")
+  }
+
+  connectionInProgress = true
+
   const preference = detectTransportPreference()
 
   if (preference === "sse") {
@@ -106,8 +150,23 @@ function scheduleReconnect(options: LiveViewOptions) {
   if (reconnectTimeoutId !== null) {
     clearTimeout(reconnectTimeoutId)
   }
+
+  // Disconnect any lingering transport immediately. The reconnect will
+  // start fresh in 1 second.
+  if (activeDisconnect) {
+    activeDisconnect()
+    activeDisconnect = null
+  }
+
+  // Remove connected marker while disconnected
+  const container = document.getElementById("live-view-container")
+  if (container) {
+    container.removeAttribute("data-lv-connected")
+  }
+
   reconnectTimeoutId = setTimeout(() => {
     reconnectTimeoutId = null
+    connectionInProgress = false
     connect(options)
   }, 1000)
 }
@@ -137,6 +196,7 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
 
   socket.addEventListener("open", () => {
     didOpen = true
+    connectionInProgress = false
     // WebSocket connected successfully
     const container = document.getElementById("live-view-container")
     if (container) {
@@ -161,6 +221,13 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
       transport!.send(msg)
     }, 30 * 1000)
 
+    // Register this transport as the active connection so any previous
+    // transport is cleaned up. Also register a full cleanup function.
+    registerActiveConnection(() => {
+      clearHeartbeat()
+      socket.close()
+    })
+
     // Bind initial events
     bindInitialEvents(transport, options)
   })
@@ -172,18 +239,23 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
 
   socket.addEventListener("close", () => {
     clearHeartbeat()
+    clearActiveConnection()
+    connectionInProgress = false
     const container = document.getElementById("live-view-container")
     if (container) {
       container.removeAttribute("data-lv-connected")
     }
     if (!didOpen && !fallbackCalled) {
       fallbackCalled = true
-      // WS failed at connection time — fall back to SSE
+      // WS failed at connection time — fall back to next transport
       onFallback()
-    } else {
-      // Reconnection after a successful session or after fallback failed
+    } else if (didOpen) {
+      // We had a successful connection that later dropped.
+      // Schedule a reconnect to re-establish.
       scheduleReconnect(options)
     }
+    // If !didOpen && fallbackCalled: the fallback (SSE/long-poll) is
+    // already handling this — do NOT schedule a separate reconnect.
   })
 
   socket.addEventListener("error", () => {
@@ -191,6 +263,8 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
       fallbackCalled = true
       onFallback()
     }
+    // If the socket already opened successfully and then errored,
+    // the close event will fire next and handle reconnection.
   })
 }
 
@@ -199,6 +273,13 @@ function connectWs(options: LiveViewOptions, onFallback: () => void) {
 // ---------------------------------------------------------------------------
 
 var sseHeartbeatInterval: number | null = null
+
+function clearSseHeartbeat() {
+  if (sseHeartbeatInterval !== null) {
+    clearInterval(sseHeartbeatInterval)
+    sseHeartbeatInterval = null
+  }
+}
 
 function connectSse(options: LiveViewOptions) {
   connectSseInner(options, () => {
@@ -243,6 +324,8 @@ function connectSseInner(options: LiveViewOptions, onError: () => void) {
         container.setAttribute("data-lv-connected", "true")
       }
 
+      connectionInProgress = false
+
       // Bind initial events now that transport is ready
       bindInitialEvents(transport, options)
 
@@ -256,6 +339,13 @@ function connectSseInner(options: LiveViewOptions, onError: () => void) {
         }
         sendSseEvent(state.sseId!, { t: "h" })
       }, 30 * 1000)
+
+      // Register cleanup so this transport can be disconnected
+      // before another one starts.
+      registerActiveConnection(() => {
+        clearSseHeartbeat()
+        eventSource.close()
+      })
     }
 
     handleServerMessage(transport, msg, state, options)
@@ -263,15 +353,13 @@ function connectSseInner(options: LiveViewOptions, onError: () => void) {
 
   eventSource.addEventListener("error", () => {
     eventSource.close()
+    clearSseHeartbeat()
+    clearActiveConnection()
+    connectionInProgress = false
     // Remove connected marker
     const container = document.getElementById("live-view-container")
     if (container) {
       container.removeAttribute("data-lv-connected")
-    }
-    // Clear heartbeat to avoid stale POSTs with old connection ID
-    if (sseHeartbeatInterval !== null) {
-      clearInterval(sseHeartbeatInterval)
-      sseHeartbeatInterval = null
     }
     // If we never received the initial message (connection failed),
     // call onError to fall back to next transport.
@@ -316,6 +404,13 @@ function sendSseEvent(sseId: string, msg: MessageToView): void {
 
 var longPollHeartbeatInterval: number | null = null
 
+function clearLongPollHeartbeat() {
+  if (longPollHeartbeatInterval !== null) {
+    clearInterval(longPollHeartbeatInterval)
+    longPollHeartbeatInterval = null
+  }
+}
+
 function connectLongPoll(options: LiveViewOptions) {
   const url = `${window.location.pathname}`
   var state: State = {}
@@ -350,6 +445,8 @@ function connectLongPoll(options: LiveViewOptions) {
             container.setAttribute("data-lv-connected", "true")
           }
 
+          connectionInProgress = false
+
           // Bind initial events now that transport is ready
           bindInitialEvents(transport, options)
 
@@ -363,6 +460,14 @@ function connectLongPoll(options: LiveViewOptions) {
             }
             sendLongPollEvent(state.longPollId!, { t: "h" })
           }, 30 * 1000)
+
+          // Register cleanup so this transport can be disconnected
+          // before another one starts.
+          registerActiveConnection(() => {
+            clearLongPollHeartbeat()
+            // Stop the polling loop by clearing the connection ID
+            delete state.longPollId
+          })
         }
 
         handleServerMessage(transport, msg, state, options)
@@ -373,6 +478,9 @@ function connectLongPoll(options: LiveViewOptions) {
     })
     .catch((err) => {
       console.error("Long-poll connection failed:", err)
+      clearLongPollHeartbeat()
+      clearActiveConnection()
+      connectionInProgress = false
       const container = document.getElementById("live-view-container")
       if (container) {
         container.removeAttribute("data-lv-connected")
@@ -426,13 +534,12 @@ function startLongPollLoop(options: LiveViewOptions, state: State) {
       })
       .catch((err) => {
         console.error("Long-poll error:", err)
+        clearLongPollHeartbeat()
+        clearActiveConnection()
+        connectionInProgress = false
         const container = document.getElementById("live-view-container")
         if (container) {
           container.removeAttribute("data-lv-connected")
-        }
-        if (longPollHeartbeatInterval !== null) {
-          clearInterval(longPollHeartbeatInterval)
-          longPollHeartbeatInterval = null
         }
         // Reconnect after a delay
         scheduleReconnect(options)
@@ -481,9 +588,13 @@ function handleServerMessage(
 ) {
   if (msg.t === "i") {
     state.viewState = msg.d
-    // DOM is already populated from the initial HTTP response.
-    // bindInitialEvents is called by each transport at connection time
-    // (WS: in open handler, SSE/long-poll: after receiving connection ID).
+    // On the initial page load the DOM is already populated from the
+    // initial HTTP response. On reconnection however there is no HTTP
+    // response — the DOM still shows the old state from the previous
+    // connection. We must sync the DOM to the server's fresh state.
+    if (transport) {
+      updateDomFromState(transport, state, options)
+    }
 
   } else if (msg.t === "r") {
     if (!state.viewState) { return }
