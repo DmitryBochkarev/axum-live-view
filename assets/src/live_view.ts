@@ -1269,6 +1269,7 @@ type JsCommandKind =
   | { t: "remove_class", selector: string, klass: string }
   | { t: "toggle_class", selector: string, klass: string }
   | { t: "clear_value", selector: string }
+  | { t: "focus", selector: string }
   | { t: "set_title", title: string }
   | { t: "history_push_state", uri: string }
 
@@ -1305,6 +1306,14 @@ function handleJsCommand(cmd: JsCommand) {
       document.querySelectorAll(selector).forEach((element) => {
         if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
           element.value = ""
+        }
+      })
+
+    } else if (cmd.kind.t === "focus") {
+      const { selector } = cmd.kind
+      document.querySelectorAll(selector).forEach((element) => {
+        if (element instanceof HTMLElement) {
+          element.focus()
         }
       })
 

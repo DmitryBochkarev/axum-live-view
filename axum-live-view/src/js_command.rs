@@ -45,6 +45,7 @@ pub(crate) enum JsCommandKind {
     RemoveClass { selector: String, klass: String },
     ToggleClass { selector: String, klass: String },
     ClearValue { selector: String },
+    Focus { selector: String },
     SetTitle { title: String },
     HistoryPushState { uri: String },
 }
@@ -130,6 +131,20 @@ pub fn toggle_class(selector: impl Into<String>, klass: impl Into<String>) -> Js
 /// ```
 pub fn clear_value(selector: impl Into<String>) -> JsCommand {
     JsCommandKind::ClearValue {
+        selector: selector.into(),
+    }
+    .into()
+}
+
+/// Focus an element matching a CSS selector.
+///
+/// # Example
+///
+/// ```
+/// axum_live_view::js_command::focus("input[name=player_1]");
+/// ```
+pub fn focus(selector: impl Into<String>) -> JsCommand {
+    JsCommandKind::Focus {
         selector: selector.into(),
     }
     .into()
