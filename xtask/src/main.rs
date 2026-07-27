@@ -158,8 +158,8 @@ fn calculate_hash<T: std::hash::Hash>(t: &T) -> u64 {
 }
 
 fn gzip(input: &[u8]) -> Result<Vec<u8>> {
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
     use std::io::prelude::*;
 
     let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
@@ -176,9 +176,7 @@ fn run_cmd(mut cmd: Command) -> Result {
 
 fn test_integration() -> Result {
     // 0. Kill any leftover servers from previous runs
-    let _ = Command::new("pkill")
-        .args(["-f", "example-todo"])
-        .status();
+    let _ = Command::new("pkill").args(["-f", "example-todo"]).status();
     let _ = Command::new("pkill")
         .args(["-f", "example-counter-sse"])
         .status();
@@ -216,23 +214,21 @@ fn test_integration() -> Result {
     println!("→ Installing integration test dependencies...");
     let integration_dir = project_root().join("integration-tests");
     let mut install_cmd = Command::new("npm");
-    install_cmd
-        .current_dir(&integration_dir)
-        .arg("install");
+    install_cmd.current_dir(&integration_dir).arg("install");
     run_cmd(install_cmd)?;
 
     // 4. Run the Playwright tests
     println!("→ Running integration tests...");
     let mut test_cmd = Command::new("npx");
-    test_cmd
-        .current_dir(&integration_dir)
-        .args(["playwright", "test", "--config=playwright.config.ts"]);
+    test_cmd.current_dir(&integration_dir).args([
+        "playwright",
+        "test",
+        "--config=playwright.config.ts",
+    ]);
     run_cmd(test_cmd)?;
 
     // 5. Clean up any remaining servers
-    let _ = Command::new("pkill")
-        .args(["-f", "example-todo"])
-        .status();
+    let _ = Command::new("pkill").args(["-f", "example-todo"]).status();
     let _ = Command::new("pkill")
         .args(["-f", "example-counter-sse"])
         .status();

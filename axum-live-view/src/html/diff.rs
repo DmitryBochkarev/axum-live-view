@@ -1,4 +1,4 @@
-use super::{empty_slice, serialize_msg, DynamicFragment, Html, IndexMap};
+use super::{DynamicFragment, Html, IndexMap, empty_slice, serialize_msg};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -202,11 +202,7 @@ impl<T> DynamicFragment<T> {
 }
 
 fn diff_fixed(a: &'static [&'static str], b: &'static [&'static str]) -> &'static [&'static str] {
-    if a.len() == b.len() && a == b {
-        &[]
-    } else {
-        b
-    }
+    if a.len() == b.len() && a == b { &[] } else { b }
 }
 
 #[derive(Debug)]

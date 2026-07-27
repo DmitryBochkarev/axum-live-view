@@ -3,7 +3,11 @@ use axum_live_view::{
     Html, LiveView, LiveViewUpgrade, event_data::EventData, html, live_page, live_view::Updated,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -70,8 +74,8 @@ impl Wordle {
     const MAX_GUESSES: usize = 6;
 
     const WORDS: &[&str] = &[
-        "hello", "world", "rusty", "crate", "async", "tokio", "serde", "frame", "stack",
-        "bytes", "error", "match", "macro", "trait",
+        "hello", "world", "rusty", "crate", "async", "tokio", "serde", "frame", "stack", "bytes",
+        "error", "match", "macro", "trait",
     ];
 
     fn new_random() -> Self {

@@ -266,10 +266,10 @@ pub mod event_data;
 pub mod extract;
 pub mod js_command;
 pub mod live_view;
-pub mod sse;
 pub(crate) mod long_poll;
-pub(crate) mod transport;
+pub mod sse;
 pub mod test;
+pub(crate) mod transport;
 
 mod html;
 mod life_cycle;
@@ -345,7 +345,7 @@ where
     S: Clone + Send + Sync + 'static,
 {
     use axum::{
-        http::{header, HeaderMap, HeaderValue, StatusCode},
+        http::{HeaderMap, HeaderValue, StatusCode, header},
         response::IntoResponse,
         routing::get,
     };

@@ -1,20 +1,20 @@
 use crate::{
+    LiveView,
     event_data::EventData,
     html::Html,
     js_command::JsCommand,
     live_view::{Updated, ViewHandle},
     util::ReceiverStream,
-    LiveView,
 };
 use futures_util::{
+    TryStream, TryStreamExt,
     sink::{Sink, SinkExt},
     stream::StreamExt,
-    TryStream, TryStreamExt,
 };
 use http::{HeaderMap, Uri};
 use serde::{
-    de::{self, DeserializeOwned},
     Deserialize, Serialize,
+    de::{self, DeserializeOwned},
 };
 use serde_json::Value;
 use std::{fmt, marker::PhantomData};

@@ -1,8 +1,8 @@
 use crate::{
+    LiveView,
     event_data::EventData,
     html::Html,
     live_view::{Updated, ViewHandle},
-    LiveView,
 };
 use axum::http::{HeaderMap, Uri};
 use serde::{Deserialize, Serialize};

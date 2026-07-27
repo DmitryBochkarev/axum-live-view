@@ -1,14 +1,14 @@
 use axum::{
-    http::{header, HeaderMap, Uri},
+    Router,
+    http::{HeaderMap, Uri, header},
     response::IntoResponse,
     routing::get,
-    Router,
 };
 use axum_live_view::{
+    Html, LiveView, LiveViewUpgrade,
     event_data::EventData,
     html, live_page,
     live_view::{Updated, ViewHandle},
-    Html, LiveView, LiveViewUpgrade,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -25,10 +25,9 @@ async fn main() {
     let app = axum_live_view::setup(
         Router::new()
             .route("/", live_page(root))
-
             .route("/xp.css", get(xp_css))
             .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
-            .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
+            .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2)),
     );
 
     let port: u16 = std::env::var("PORT")
@@ -68,7 +67,8 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                 </body>
             </html>
         }
-    }).await
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -140,9 +140,7 @@ impl LiveView for TimerView {
     ) {
         // Spawn a background task that ticks the timer every TICK_MS.
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                std::time::Duration::from_millis(TICK_MS),
-            );
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
             loop {
                 interval.tick().await;
                 if handle.send(Msg::Tick).await.is_err() {
@@ -309,7 +307,10 @@ mod tests {
 
     #[tokio::test]
     async fn tick_stops_when_elapsed_reaches_duration() {
-        let view_state = TimerView { duration_ms: 300, ..Default::default() };
+        let view_state = TimerView {
+            duration_ms: 300,
+            ..Default::default()
+        };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -329,7 +330,10 @@ mod tests {
     #[tokio::test]
     async fn tick_clamps_to_duration() {
         // 300ms with 100ms ticks — after 3 ticks it should clamp to exactly 300ms.
-        let view_state = TimerView { duration_ms: 300, ..Default::default() };
+        let view_state = TimerView {
+            duration_ms: 300,
+            ..Default::default()
+        };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -344,16 +348,17 @@ mod tests {
     async fn set_duration_updates_immediately() {
         let view = run_live_view(TimerView::default()).mount().await;
 
-        let (html, _) = view
-            .send(Msg::SetDuration, input_event("20"))
-            .await;
+        let (html, _) = view.send(Msg::SetDuration, input_event("20")).await;
 
         assert!(html.contains("20 s"));
     }
 
     #[tokio::test]
     async fn increasing_duration_restarts_timer() {
-        let view_state = TimerView { duration_ms: 300, ..Default::default() };
+        let view_state = TimerView {
+            duration_ms: 300,
+            ..Default::default()
+        };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -365,9 +370,7 @@ mod tests {
         assert!(html.contains("0.3 s"));
 
         // Increase the duration from 300ms to 10s.
-        let (html, _) = view
-            .send(Msg::SetDuration, input_event("10"))
-            .await;
+        let (html, _) = view.send(Msg::SetDuration, input_event("10")).await;
         assert!(!html.contains("Timer finished"));
         assert!(html.contains("10 s"));
 
@@ -388,9 +391,7 @@ mod tests {
         assert!(!html.contains("Timer finished"));
 
         // Drop duration to 1s. Since 2.1s >= 1s, timer should stop.
-        let (html, _) = view
-            .send(Msg::SetDuration, input_event("1"))
-            .await;
+        let (html, _) = view.send(Msg::SetDuration, input_event("1")).await;
         assert!(html.contains("Timer finished"));
         assert!(html.contains("1 s"));
 
@@ -422,7 +423,10 @@ mod tests {
 
     #[tokio::test]
     async fn reset_restarts_completed_timer() {
-        let view_state = TimerView { duration_ms: 500, ..Default::default() };
+        let view_state = TimerView {
+            duration_ms: 500,
+            ..Default::default()
+        };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -445,7 +449,10 @@ mod tests {
 
     #[tokio::test]
     async fn gauge_shows_correct_fill() {
-        let view_state = TimerView { duration_ms: 1000, ..Default::default() };
+        let view_state = TimerView {
+            duration_ms: 1000,
+            ..Default::default()
+        };
 
         let view = run_live_view(view_state).mount().await;
 
@@ -476,9 +483,7 @@ mod tests {
         assert!(html.contains("3.0 s"));
 
         // Change duration.
-        let (html, _) = view
-            .send(Msg::SetDuration, input_event("5"))
-            .await;
+        let (html, _) = view.send(Msg::SetDuration, input_event("5")).await;
         assert!(html.contains("5 s"));
         assert!(html.contains("3.0 s")); // elapsed unchanged
     }
@@ -487,9 +492,7 @@ mod tests {
     async fn zero_duration_stops_immediately() {
         let view = run_live_view(TimerView::default()).mount().await;
 
-        let (html, _) = view
-            .send(Msg::SetDuration, input_event("0"))
-            .await;
+        let (html, _) = view.send(Msg::SetDuration, input_event("0")).await;
         assert!(html.contains("Timer finished"));
     }
 }

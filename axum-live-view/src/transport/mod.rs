@@ -5,12 +5,10 @@
 //! shares.
 
 use crate::{
-    event_data::EventData,
-    life_cycle::{
-        EventMessageFromSocketData, UpdateResponse, ViewRequestError, ViewTaskHandle,
-    },
-    live_view::ViewHandle,
     LiveView,
+    event_data::EventData,
+    life_cycle::{EventMessageFromSocketData, UpdateResponse, ViewRequestError, ViewTaskHandle},
+    live_view::ViewHandle,
 };
 use axum::http::{HeaderMap, Uri};
 use serde::Serialize;
@@ -197,9 +195,8 @@ where
         .decode_utf8()
         .map_err(|_| ViewRequestError::ChannelClosed(crate::life_cycle::ChannelClosed))?;
 
-    let msg: M = serde_json::from_str(&decoded).map_err(|_| {
-        ViewRequestError::ChannelClosed(crate::life_cycle::ChannelClosed)
-    })?;
+    let msg: M = serde_json::from_str(&decoded)
+        .map_err(|_| ViewRequestError::ChannelClosed(crate::life_cycle::ChannelClosed))?;
 
     let event_data = parse_event_data(&raw);
 
@@ -253,10 +250,7 @@ pub(crate) fn forward_to_broadcast(
 
 /// Push [`UpdateResponse`] into a callback that accepts individual
 /// [`ServerMessage`] values (e.g. for long-poll's pending-message buffer).
-pub(crate) fn forward_to_push(
-    push: impl Fn(ServerMessage),
-    response: UpdateResponse,
-) {
+pub(crate) fn forward_to_push(push: impl Fn(ServerMessage), response: UpdateResponse) {
     match response {
         UpdateResponse::Diff(diff) => push(ServerMessage::Render(diff)),
         UpdateResponse::JsCommands(commands) => push(ServerMessage::JsCommands(commands)),

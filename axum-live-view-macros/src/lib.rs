@@ -43,13 +43,13 @@
 #![cfg_attr(test, allow(clippy::float_cmp))]
 
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use std::fmt::Write;
 use syn::{
+    Block, Ident, LitStr, Token,
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
     spanned::Spanned,
-    Block, Ident, LitStr, Token,
 };
 
 #[proc_macro]

@@ -12,8 +12,7 @@
 
 use axum::{Router, response::IntoResponse};
 use axum_live_view::{
-    event_data::EventData, html, live_page, live_view::Updated,
-    LiveViewUpgrade, Html, LiveView,
+    Html, LiveView, LiveViewUpgrade, event_data::EventData, html, live_page, live_view::Updated,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -23,10 +22,7 @@ use tokio::net::TcpListener;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let app = axum_live_view::setup(
-        Router::new()
-            .route("/", live_page(root))
-    );
+    let app = axum_live_view::setup(Router::new().route("/", live_page(root)));
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -52,7 +48,8 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                 </body>
             </html>
         }
-    }).await
+    })
+    .await
 }
 
 #[derive(Default, Clone)]

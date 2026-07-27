@@ -65,11 +65,11 @@
 //! ```
 
 use crate::{
+    LiveView,
     event_data::EventData,
     js_command::JsCommand,
     life_cycle::{UpdateResponse, ViewRequestError, ViewTaskHandle},
     live_view::ViewHandle,
-    LiveView,
 };
 use http::{HeaderMap, Uri};
 use serde::Serialize;
@@ -212,7 +212,7 @@ mod tests {
     use super::*;
     use crate as axum_live_view;
     use crate::event_data::Input;
-    use crate::{live_view::Updated, Html};
+    use crate::{Html, live_view::Updated};
     use axum_live_view_macros::html;
     use serde::Deserialize;
 

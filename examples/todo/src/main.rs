@@ -10,11 +10,7 @@ use tokio::net::TcpListener;
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let app = axum_live_view::setup(
-        Router::new()
-            .route("/", live_page(root))
-
-    );
+    let app = axum_live_view::setup(Router::new().route("/", live_page(root)));
 
     let port: u16 = std::env::var("PORT")
         .ok()
@@ -43,7 +39,8 @@ async fn root(live: LiveViewUpgrade) -> impl IntoResponse {
                 </body>
             </html>
         }
-    }).await
+    })
+    .await
 }
 
 const STYLE: &str = r#"
@@ -326,78 +323,78 @@ impl LiveView for TodoApp {
         let completed = self.todos.len() - remaining;
 
         html! {
-                    <div class="todoapp">
-                        <h1>"todos"</h1>
+            <div class="todoapp">
+                <h1>"todos"</h1>
 
-                        // --- Add new todo form ---
-                        <form class="add-todo-form" axm-submit={ Msg::Add }>
-                            <input
-                                class="add-todo-input"
-                                type="text"
-                                placeholder="What needs to be done?"
-                                axm-input={ Msg::Input }
-                            />
-                        </form>
+                // --- Add new todo form ---
+                <form class="add-todo-form" axm-submit={ Msg::Add }>
+                    <input
+                        class="add-todo-input"
+                        type="text"
+                        placeholder="What needs to be done?"
+                        axm-input={ Msg::Input }
+                    />
+                </form>
 
-                        // --- Filter tabs ---
-                        <div class="filters">
-                            for filter in [Filter::All, Filter::Active, Filter::Completed] {
-                                <button
-                                    class=if self.filter == filter { "filter-btn selected" } else { "filter-btn" }
-                                    axm-click={ Msg::SetFilter(filter) }
+                // --- Filter tabs ---
+                <div class="filters">
+                    for filter in [Filter::All, Filter::Active, Filter::Completed] {
+                        <button
+                            class=if self.filter == filter { "filter-btn selected" } else { "filter-btn" }
+                            axm-click={ Msg::SetFilter(filter) }
+                        >
+                            { filter.label() }
+                        </button>
+                    }
+                </div>
+
+                // --- Todo list (always in DOM, toggled via CSS) ---
+                if filtered.is_empty() {
+                    <p class="empty-msg">"No todos to show."</p>
+                } else {
+                    <ul class="todo-list">
+                        for todo in &filtered {
+                            <li class="todo-item">
+                                <input
+                                    class="todo-checkbox"
+                                    type="checkbox"
+                                    checked=if todo.completed { Some(()) } else { None }
+                                    axm-click={ Msg::Toggle(todo.id) }
+                                />
+                                <span
+                                    class=if todo.completed { "todo-text completed" } else { "todo-text" }
                                 >
-                                    { filter.label() }
+                                    { &todo.text }
+                                </span>
+                                <button
+                                    class="todo-delete"
+                                    axm-click={ Msg::Delete(todo.id) }
+                                >
+                                    "x"
                                 </button>
-                            }
-                        </div>
-
-                        // --- Todo list (always in DOM, toggled via CSS) ---
-                        if filtered.is_empty() {
-                            <p class="empty-msg">"No todos to show."</p>
-                        } else {
-                            <ul class="todo-list">
-                                for todo in &filtered {
-                                    <li class="todo-item">
-                                        <input
-                                            class="todo-checkbox"
-                                            type="checkbox"
-                                            checked=if todo.completed { Some(()) } else { None }
-                                            axm-click={ Msg::Toggle(todo.id) }
-                                        />
-                                        <span
-                                            class=if todo.completed { "todo-text completed" } else { "todo-text" }
-                                        >
-                                            { &todo.text }
-                                        </span>
-                                        <button
-                                            class="todo-delete"
-                                            axm-click={ Msg::Delete(todo.id) }
-                                        >
-                                            "x"
-                                        </button>
-                                    </li>
-                                }
-                            </ul>
+                            </li>
                         }
-                        // --- Footer with counts and clear ---
-                        <div class="footer">
-                            <span class="items-left">
-                                { remaining }
-                                " "
-                                { if remaining == 1 { "item left" } else { "items left" } }
-                            </span>
-
-                            if completed > 0 {
-                                <button
-                                    class="clear-completed"
-                                    axm-click={ Msg::ClearCompleted }
-                                >
-                                    "Clear completed (" { completed } ")"
-                                </button>
-                            }
-                        </div>
-                    </div>
+                    </ul>
                 }
+                // --- Footer with counts and clear ---
+                <div class="footer">
+                    <span class="items-left">
+                        { remaining }
+                        " "
+                        { if remaining == 1 { "item left" } else { "items left" } }
+                    </span>
+
+                    if completed > 0 {
+                        <button
+                            class="clear-completed"
+                            axm-click={ Msg::ClearCompleted }
+                        >
+                            "Clear completed (" { completed } ")"
+                        </button>
+                    }
+                </div>
+            </div>
+        }
     }
 }
 

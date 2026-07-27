@@ -1,6 +1,6 @@
 // vendored to not depend on tokio-stream, which depends on an outdated version of tokio-util
 
-use futures_util::{ready, Stream};
+use futures_util::{Stream, ready};
 use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -142,11 +142,7 @@ where
         Pending => done = false,
     }
 
-    if done {
-        Ready(None)
-    } else {
-        Pending
-    }
+    if done { Ready(None) } else { Pending }
 }
 
 fn merge_size_hints(

@@ -7,14 +7,14 @@
 //! Shared types live in [`crate::transport`].
 
 use crate::{
+    LiveView,
     life_cycle::spawn_view,
     live_view::ViewHandle,
     transport::{
-        ConnectionId, ConnectionRegistry, RawEvent, ServerMessage,
-        forward_to_broadcast, process_client_event,
+        ConnectionId, ConnectionRegistry, RawEvent, ServerMessage, forward_to_broadcast,
+        process_client_event,
     },
     util::ReceiverStream,
-    LiveView,
 };
 use axum::{
     http::{HeaderMap, StatusCode, Uri},
@@ -250,10 +250,7 @@ pub async fn event_handler(
     headers: HeaderMap,
     body: bytes::Bytes,
 ) -> Response {
-    let connection_id = match headers
-        .get("x-live-view-id")
-        .and_then(|v| v.to_str().ok())
-    {
+    let connection_id = match headers.get("x-live-view-id").and_then(|v| v.to_str().ok()) {
         Some(id) => ConnectionId(id.to_owned()),
         None => return (StatusCode::BAD_REQUEST, "missing x-live-view-id header").into_response(),
     };

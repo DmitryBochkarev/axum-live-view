@@ -115,7 +115,10 @@ fn multiple_attributes() {
     let view: Html<()> = html! {
         <div class="col-md" id="the-thing">"foo"</div>
     };
-    assert_eq!(view.render(), "<div class=\"col-md\" id=\"the-thing\">foo</div>");
+    assert_eq!(
+        view.render(),
+        "<div class=\"col-md\" id=\"the-thing\">foo</div>"
+    );
 }
 
 #[test]
@@ -156,7 +159,10 @@ fn attribute_with_spaces() {
     let view: Html<()> = html! {
         <input placeholder="What needs to be done?" />
     };
-    assert_eq!(view.render(), "<input placeholder=\"What needs to be done?\">");
+    assert_eq!(
+        view.render(),
+        "<input placeholder=\"What needs to be done?\">"
+    );
 }
 
 #[test]

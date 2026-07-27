@@ -1,15 +1,15 @@
 use axum::{
+    Router,
     extract::State,
-    http::{header, HeaderMap, Uri},
+    http::{HeaderMap, Uri, header},
     response::IntoResponse,
     routing::get,
-    Router,
 };
 use axum_live_view::{
+    Html, LiveView, LiveViewUpgrade,
     event_data::EventData,
     html, live_page,
     live_view::{Updated, ViewHandle},
-    Html, LiveView, LiveViewUpgrade,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -33,11 +33,10 @@ async fn main() {
         Router::new()
             .route("/", live_page(root))
             .route("/observe", live_page(observe))
-
             .route("/xp.css", get(xp_css))
             .route("/ms_sans_serif.woff", get(ms_sans_serif_woff))
             .route("/ms_sans_serif.woff2", get(ms_sans_serif_woff2))
-            .with_state(state)
+            .with_state(state),
     );
 
     let port: u16 = std::env::var("PORT")
@@ -76,10 +75,7 @@ struct RefreshPing;
 // ---------------------------------------------------------------------------
 
 /// Admin page – create matches, add points.
-async fn root(
-    live: LiveViewUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn root(live: LiveViewUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     let view = TennisApp {
         data: state.data.clone(),
         tx: state.tx.clone(),
@@ -117,10 +113,7 @@ async fn root(
 }
 
 /// Read-only observer page – see scores update in real time, no controls.
-async fn observe(
-    live: LiveViewUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn observe(live: LiveViewUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     let view = ObserverApp {
         data: state.data.clone(),
         tx: state.tx.clone(),
@@ -160,7 +153,10 @@ async fn observe(
 // ---------------------------------------------------------------------------
 
 async fn xp_css() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], include_str!("../assets/xp.css"))
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../assets/xp.css"),
+    )
 }
 
 async fn ms_sans_serif_woff() -> impl IntoResponse {
@@ -333,8 +329,7 @@ impl LiveView for TennisApp {
 
     fn render(&self) -> Html<Self::Message> {
         let data = self.data.read().unwrap();
-        let form_is_valid =
-            !self.player_1.trim().is_empty() && !self.player_2.trim().is_empty();
+        let form_is_valid = !self.player_1.trim().is_empty() && !self.player_2.trim().is_empty();
 
         let match_colors: Vec<(&str, &str)> = data
             .matches
@@ -622,12 +617,8 @@ mod tests {
         let obs_h = run_live_view(observer).mount().await;
 
         // Admin creates a match.
-        admin_h
-            .send(Msg::Player1Input, input_event("Serena"))
-            .await;
-        admin_h
-            .send(Msg::Player2Input, input_event("Venus"))
-            .await;
+        admin_h.send(Msg::Player1Input, input_event("Serena")).await;
+        admin_h.send(Msg::Player2Input, input_event("Venus")).await;
         admin_h
             .send(Msg::CreateMatch, form_submit("Serena", "Venus"))
             .await;
@@ -661,26 +652,16 @@ mod tests {
         let obs_h = run_live_view(observer).mount().await;
 
         // Create match as admin.
-        admin_h
-            .send(Msg::Player1Input, input_event("Roger"))
-            .await;
-        admin_h
-            .send(Msg::Player2Input, input_event("Rafa"))
-            .await;
+        admin_h.send(Msg::Player1Input, input_event("Roger")).await;
+        admin_h.send(Msg::Player2Input, input_event("Rafa")).await;
         admin_h
             .send(Msg::CreateMatch, form_submit("Roger", "Rafa"))
             .await;
 
         // Add points.
-        admin_h
-            .send(Msg::AddPoint(0, PlayerNum::One), None)
-            .await;
-        admin_h
-            .send(Msg::AddPoint(0, PlayerNum::One), None)
-            .await;
-        admin_h
-            .send(Msg::AddPoint(0, PlayerNum::Two), None)
-            .await;
+        admin_h.send(Msg::AddPoint(0, PlayerNum::One), None).await;
+        admin_h.send(Msg::AddPoint(0, PlayerNum::One), None).await;
+        admin_h.send(Msg::AddPoint(0, PlayerNum::Two), None).await;
 
         // Observer sees the updated score.
         let (obs_html, _) = obs_h.send(ObserverMsg::Refresh, None).await;
@@ -706,14 +687,10 @@ mod tests {
         let html = view.render().await;
         assert!(html.contains("disabled"));
 
-        let (html, _) = view
-            .send(Msg::Player1Input, input_event("Roger"))
-            .await;
+        let (html, _) = view.send(Msg::Player1Input, input_event("Roger")).await;
         assert!(html.contains("disabled"));
 
-        let (html, _) = view
-            .send(Msg::Player2Input, input_event("Rafa"))
-            .await;
+        let (html, _) = view.send(Msg::Player2Input, input_event("Rafa")).await;
         assert!(!html.contains("disabled"));
     }
 
@@ -757,7 +734,8 @@ mod tests {
 
         view.send(Msg::Player1Input, input_event("Roger")).await;
         view.send(Msg::Player2Input, input_event("Rafa")).await;
-        view.send(Msg::CreateMatch, form_submit("Roger", "Rafa")).await;
+        view.send(Msg::CreateMatch, form_submit("Roger", "Rafa"))
+            .await;
 
         let (html, _) = view.send(Msg::AddPoint(0, PlayerNum::One), None).await;
         assert!(html.contains("Points: 1"));
@@ -773,9 +751,7 @@ mod tests {
     async fn empty_form_does_not_create_match() {
         let view = run_live_view(TennisApp::new_test()).mount().await;
 
-        let (html, _) = view
-            .send(Msg::CreateMatch, form_submit("", ""))
-            .await;
+        let (html, _) = view.send(Msg::CreateMatch, form_submit("", "")).await;
 
         assert!(html.contains("Create some and they will be listed here."));
     }
@@ -786,9 +762,7 @@ mod tests {
 
         view.send(Msg::Player1Input, input_event("   ")).await;
         view.send(Msg::Player2Input, input_event("   ")).await;
-        let (html, _) = view
-            .send(Msg::CreateMatch, form_submit("   ", "   "))
-            .await;
+        let (html, _) = view.send(Msg::CreateMatch, form_submit("   ", "   ")).await;
 
         assert!(html.contains("Create some and they will be listed here."));
     }
@@ -816,12 +790,8 @@ mod tests {
         let handle2 = run_live_view(view2).mount().await;
 
         // View 1 creates a match.
-        handle1
-            .send(Msg::Player1Input, input_event("Roger"))
-            .await;
-        handle1
-            .send(Msg::Player2Input, input_event("Rafa"))
-            .await;
+        handle1.send(Msg::Player1Input, input_event("Roger")).await;
+        handle1.send(Msg::Player2Input, input_event("Rafa")).await;
         handle1
             .send(Msg::CreateMatch, form_submit("Roger", "Rafa"))
             .await;
@@ -834,9 +804,7 @@ mod tests {
         assert!(html2.contains("Rafa"));
 
         // View 2 adds a point.
-        handle2
-            .send(Msg::AddPoint(0, PlayerNum::One), None)
-            .await;
+        handle2.send(Msg::AddPoint(0, PlayerNum::One), None).await;
         let (html2, _) = handle2.send(Msg::Refresh, None).await;
         assert!(html2.contains("Points: 1"));
 

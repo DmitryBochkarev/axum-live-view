@@ -1,14 +1,14 @@
 use axum::{
+    Router,
     extract::Extension,
     http::{HeaderMap, Uri},
     response::IntoResponse,
-    Router,
 };
 use axum_live_view::{
+    Html, LiveView, LiveViewUpgrade,
     event_data::EventData,
     html, js_command, live_page,
     live_view::{self, Updated, ViewHandle},
-    Html, LiveView, LiveViewUpgrade,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -27,14 +27,11 @@ async fn main() {
     let (tx, _) = broadcast::channel::<NewMessagePing>(1024);
 
     let app = axum_live_view::setup(
-        Router::new()
-            .route("/", live_page(root))
-
-            .layer(
-                ServiceBuilder::new()
-                    .layer(Extension(messages))
-                    .layer(Extension(tx)),
-            )
+        Router::new().route("/", live_page(root)).layer(
+            ServiceBuilder::new()
+                .layer(Extension(messages))
+                .layer(Extension(tx)),
+        ),
     );
 
     let port: u16 = std::env::var("PORT")
@@ -88,7 +85,8 @@ async fn root(
                 </body>
             </html>
         }
-    }).await
+    })
+    .await
 }
 
 struct MessagesList {

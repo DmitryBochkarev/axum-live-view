@@ -3,7 +3,7 @@
 use crate::{event_data::EventData, html::Html, js_command::JsCommand};
 use axum::http::{HeaderMap, Uri};
 use futures_util::Stream;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{fmt, future::Future, pin::Pin};
 use tokio::sync::mpsc;
 

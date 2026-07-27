@@ -18,23 +18,21 @@
 //! [`ConnectionRegistry`]: crate::transport::ConnectionRegistry
 
 use crate::{
+    LiveView,
     life_cycle::spawn_view,
     live_view::ViewHandle,
     transport::{
         ConnectionHandle, ConnectionId, ConnectionRegistry, RawEvent, ServerMessage,
         forward_to_push, new_connection_id, process_client_event,
     },
-    LiveView,
 };
-use axum::{
-    http::{HeaderMap, Uri},
-};
+use axum::http::{HeaderMap, Uri};
 use serde::Serialize;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
 };
-use tokio::sync::{broadcast, mpsc, Notify};
+use tokio::sync::{Notify, broadcast, mpsc};
 
 // ---------------------------------------------------------------------------
 // Per-connection state
@@ -286,11 +284,7 @@ async fn run_long_poll_view_task<L>(
     cleanup(&registry, &lp_connections, &connection_id);
 }
 
-fn cleanup(
-    registry: &ConnectionRegistry,
-    lp_connections: &LongPollConnections,
-    id: &ConnectionId,
-) {
+fn cleanup(registry: &ConnectionRegistry, lp_connections: &LongPollConnections, id: &ConnectionId) {
     registry.remove(id);
     lp_connections.remove(id);
 }

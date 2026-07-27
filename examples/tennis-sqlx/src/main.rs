@@ -746,12 +746,8 @@ mod tests {
         let (tx, _) = broadcast::channel(1024);
         let state = AppState { db: pool, tx };
 
-        let h1 = run_live_view(TennisApp::new(state.clone()))
-            .mount()
-            .await;
-        let h2 = run_live_view(TennisApp::new(state.clone()))
-            .mount()
-            .await;
+        let h1 = run_live_view(TennisApp::new(state.clone())).mount().await;
+        let h2 = run_live_view(TennisApp::new(state.clone())).mount().await;
 
         h1.send(Msg::Player1Input, input_event("Roger")).await;
         h1.send(Msg::Player2Input, input_event("Rafa")).await;
@@ -787,12 +783,8 @@ mod tests {
         let (tx, _) = broadcast::channel(1024);
         let state = AppState { db: pool, tx };
 
-        let admin = run_live_view(TennisApp::new(state.clone()))
-            .mount()
-            .await;
-        let obs = run_live_view(ObserverApp::new(state.clone()))
-            .mount()
-            .await;
+        let admin = run_live_view(TennisApp::new(state.clone())).mount().await;
+        let obs = run_live_view(ObserverApp::new(state.clone())).mount().await;
 
         admin.send(Msg::Player1Input, input_event("Serena")).await;
         admin.send(Msg::Player2Input, input_event("Venus")).await;

@@ -1,24 +1,24 @@
 //! Extractor for embedding live views in HTML templates.
 
 use crate::{
+    LiveView,
     html::Html,
     life_cycle::run_view,
     long_poll::{LongPollConnections, LongPollResponse},
-    sse::{broadcast_to_mpsc, run_sse_connection, SseStream},
+    sse::{SseStream, broadcast_to_mpsc, run_sse_connection},
     transport::{ConnectionHandle, ConnectionId, ConnectionRegistry, ServerMessage},
     util::ReceiverStream,
-    LiveView,
 };
 use axum::{
     body::Body,
     extract::{
-        ws::{self, WebSocket, WebSocketUpgrade},
         FromRequestParts,
+        ws::{self, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode, Uri},
     response::{
-        sse::{KeepAlive, Sse},
         IntoResponse, Response,
+        sse::{KeepAlive, Sse},
     },
 };
 use futures_util::{
@@ -74,10 +74,7 @@ where
     type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let sse = parts
-            .extensions
-            .get::<Arc<ConnectionRegistry>>()
-            .cloned();
+        let sse = parts.extensions.get::<Arc<ConnectionRegistry>>().cloned();
         let lp_connections = parts
             .extensions
             .get::<Arc<LongPollConnections>>()
@@ -239,14 +236,8 @@ impl LiveViewUpgrade {
                 sse,
                 lp_connections,
             } => {
-                long_poll_response::<L, F, Fut>(
-                    sse,
-                    lp_connections,
-                    gather_view,
-                    uri,
-                    headers,
-                )
-                .await
+                long_poll_response::<L, F, Fut>(sse, lp_connections, gather_view, uri, headers)
+                    .await
             }
         }
     }
@@ -348,10 +339,7 @@ where
     Fut: std::future::Future<Output = Html<L::Message>>,
 {
     // Subsequent poll — look up existing connection
-    if let Some(conn_id_str) = headers
-        .get("x-live-view-id")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(conn_id_str) = headers.get("x-live-view-id").and_then(|v| v.to_str().ok()) {
         let conn_id = ConnectionId(conn_id_str.to_owned());
         if !lp_connections.contains(&conn_id) {
             return (StatusCode::GONE, "connection expired").into_response();
@@ -399,13 +387,8 @@ where
             .into_response();
     };
 
-    let conn_id = crate::long_poll::start_long_poll_connection(
-        view,
-        uri,
-        headers,
-        &sse,
-        &lp_connections,
-    );
+    let conn_id =
+        crate::long_poll::start_long_poll_connection(view, uri, headers, &sse, &lp_connections);
 
     // Return a response with a streaming body. When axum polls the body,
     // it will wait for the view task to push the initial render into the

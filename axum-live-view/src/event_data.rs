@@ -2,7 +2,7 @@
 
 mod inner {
     use crate::life_cycle::{self, EventMessageFromSocketData};
-    use serde::{de::DeserializeOwned, Serialize};
+    use serde::{Serialize, de::DeserializeOwned};
     use std::fmt;
 
     /// The data for an event that happened on the client.
