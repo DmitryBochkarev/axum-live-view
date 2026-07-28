@@ -783,9 +783,39 @@ const axm_window = {
   scroll: "axm-scroll",
 }
 
+/// Tracks all element-level event listeners so they can be removed before
+/// each DOM patch and re-bound afterwards.  This is necessary because
+/// morphdom may reuse existing DOM nodes and only update their attributes.
+/// If an element's set of axm-* attributes changes (added, removed, or
+/// changed type), we must unbind the old listeners and bind fresh ones.
+interface TrackedListener {
+  listenOn: Element | typeof document,
+  eventName: string,
+  callback: (event: Event) => void,
+}
+
+var trackedListeners: TrackedListener[] = []
+
+/// Remove all tracked element-level event listeners and clear the list.
+function removeTrackedListeners() {
+  for (var i = 0; i < trackedListeners.length; i++) {
+    var entry = trackedListeners[i]
+    if (!entry) { continue }
+    entry.listenOn.removeEventListener(entry.eventName, entry.callback)
+  }
+  trackedListeners = []
+}
+
 function bindInitialEvents(transport: Transport, options: LiveViewOptions) {
   const attrs = Object.values(axm).map((attr) => `[${attr}]`).join(", ")
 
+  document.querySelectorAll(attrs).forEach((element) => {
+    addEventListeners(transport, element, options)
+  })
+}
+
+function bindAllElementEvents(transport: Transport, options: LiveViewOptions) {
+  const attrs = Object.values(axm).map((attr) => `[${attr}]`).join(", ")
   document.querySelectorAll(attrs).forEach((element) => {
     addEventListeners(transport, element, options)
   })
@@ -1007,6 +1037,15 @@ function on(
       event: eventName,
       callback: callback,
     })
+  } else {
+    // Track element-level listeners so we can remove them before morphdom
+    // and re-bind afterwards.  This handles cases where morphdom reuses
+    // DOM nodes but changes their axm-* attributes.
+    trackedListeners.push({
+      listenOn: listenForEventOn,
+      eventName: eventName,
+      callback: callback,
+    })
   }
 
   listenForEventOn.addEventListener(eventName, callback)
@@ -1121,21 +1160,28 @@ function updateDomFromState(transport: Transport, state: State, options: LiveVie
   }
 
   function patchDom(transport: Transport, element: Element, html: string) {
-    for (var i = 0; i < documentEventListeners.length; i++) {
+    // Remove document-level event listeners. Iterate in reverse so that
+    // splicing doesn't skip elements.
+    for (var i = documentEventListeners.length - 1; i >= 0; i--) {
       let e = documentEventListeners[i]
       if (!e) { continue }
       document.removeEventListener(e.event, e.callback)
       documentEventListeners.splice(i, 1);
     }
 
-    morphdom(element, html, {
-      onNodeAdded: (node) => {
-        if (node instanceof Element) {
-          addEventListeners(transport, node, options)
-        }
-        return node
-      },
-    })
+    // Remove all element-level listeners before morphdom.  morphdom may
+    // reuse existing DOM nodes and only update their attributes, which
+    // means an element's axm-* attributes can be added, removed, or
+    // change type.  By removing everything up front and re-binding after
+    // the patch we handle all cases correctly.
+    removeTrackedListeners()
+
+    morphdom(element, html)
+
+    // Re-bind element-level events on all elements that now carry axm-*
+    // attributes — this covers both newly-added nodes and existing nodes
+    // whose attributes were updated in-place.
+    bindAllElementEvents(transport, options)
 
     const attrs = Object.values(axm_window).map((attr) => `[${attr}]`).join(", ")
     document.querySelectorAll(attrs).forEach((el) => {
