@@ -1,4 +1,4 @@
-import morphdom from "morphdom"
+import Idiomorph = require("idiomorph")
 
 export class LiveView {
   private options: LiveViewOptions
@@ -785,7 +785,7 @@ const axm_window = {
 
 /// Tracks all element-level event listeners so they can be removed before
 /// each DOM patch and re-bound afterwards.  This is necessary because
-/// morphdom may reuse existing DOM nodes and only update their attributes.
+/// idiomorph may reuse existing DOM nodes and only update their attributes.
 /// If an element's set of axm-* attributes changes (added, removed, or
 /// changed type), we must unbind the old listeners and bind fresh ones.
 interface TrackedListener {
@@ -1038,8 +1038,8 @@ function on(
       callback: callback,
     })
   } else {
-    // Track element-level listeners so we can remove them before morphdom
-    // and re-bind afterwards.  This handles cases where morphdom reuses
+    // Track element-level listeners so we can remove them before idiomorph
+    // and re-bind afterwards.  This handles cases where idiomorph reuses
     // DOM nodes but changes their axm-* attributes.
     trackedListeners.push({
       listenOn: listenForEventOn,
@@ -1169,14 +1169,25 @@ function updateDomFromState(transport: Transport, state: State, options: LiveVie
       documentEventListeners.splice(i, 1);
     }
 
-    // Remove all element-level listeners before morphdom.  morphdom may
+    // Remove all element-level listeners before idiomorph.  idiomorph may
     // reuse existing DOM nodes and only update their attributes, which
     // means an element's axm-* attributes can be added, removed, or
     // change type.  By removing everything up front and re-binding after
     // the patch we handle all cases correctly.
     removeTrackedListeners()
 
-    morphdom(element, html)
+    Idiomorph.morph(element, html, {
+      callbacks: {
+        beforeAttributeUpdated(attrName, _element, changeType) {
+          // Preserve the data-lv-connected attribute which is managed
+          // by the client, not the server-rendered template.
+          if (attrName === "data-lv-connected" && changeType === "remove") {
+            return false
+          }
+          return true
+        }
+      }
+    })
 
     // Re-bind element-level events on all elements that now carry axm-*
     // attributes — this covers both newly-added nodes and existing nodes

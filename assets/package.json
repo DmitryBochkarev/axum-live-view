@@ -8,7 +8,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "morphdom": "^2.7.8"
+    "idiomorph": "^0.7.4"
   },
   "scripts": {
     "build": "tsc",
