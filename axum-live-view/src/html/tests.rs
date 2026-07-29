@@ -300,8 +300,12 @@ fn match_() {
     let view: Html<()> = html! {
         <div>
             match name {
-                Some(name) => html! { <p>{ format!("Hi {}", name) }</p> },
-                None => html! { <p>"Missing name..."</p> },
+                Some(name) => {
+                    <p>{ format!("Hi {}", name) }</p>
+                },
+                None => {
+                    <p>"Missing name..."</p>
+                },
             }
         </div>
     };
@@ -314,9 +318,15 @@ fn match_guard() {
     let view: Html<()> = html! {
         <div>
             match count {
-                Some(count) if count == 0 => html! { <p>"its zero!"</p> },
-                Some(count) => html! { <p>{ count }</p> },
-                None => html! { <p>"Missing count..."</p> },
+                Some(count) if count == 0 => {
+                    <p>"its zero!"</p>
+                },
+                Some(count) => {
+                    <p>{ count }</p>
+                },
+                None => {
+                    <p>"Missing count..."</p>
+                },
             }
         </div>
     };
@@ -877,8 +887,12 @@ fn starting_with_dynamic() {
 fn match_with_blocks() {
     let view: Html<()> = html! {
         match Some(()) {
-            Some(()) => html! { "one" },
-            None => html! { "two" },
+            Some(()) => {
+                "one"
+            },
+            None => {
+                "two"
+            },
         }
     };
     assert_eq!(view.render(), "one");
@@ -900,6 +914,610 @@ fn if_toggle() {
         pretty_print(a.diff(&b)),
         json!({
             "f": []
+        })
+    );
+}
+
+// ---------------------------------------------------------------------------
+// match tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn match_nested_html() {
+    enum Variant {
+        A,
+        B,
+    }
+
+    fn render(v: Variant) -> Html<()> {
+        html! {
+            match v {
+                Variant::A => {
+                    <div class="a">
+                        <p>"Alpha"</p>
+                    </div>
+                },
+                Variant::B => {
+                    <div class="b">
+                        <span>"Beta"</span>
+                    </div>
+                },
+            }
+        }
+    }
+
+    assert_eq!(
+        render(Variant::A).render(),
+        "<div class=\"a\"><p>Alpha</p></div>"
+    );
+    assert_eq!(
+        render(Variant::B).render(),
+        "<div class=\"b\"><span>Beta</span></div>"
+    );
+}
+
+#[test]
+fn match_multiple_nodes() {
+    let view: Html<()> = html! {
+        match true {
+            true => {
+                <p>"first"</p>
+                <p>"second"</p>
+            },
+            false => {
+                <p>"nope"</p>
+            },
+        }
+    };
+    assert_eq!(view.render(), "<p>first</p><p>second</p>");
+}
+
+#[test]
+fn match_with_if_inside() {
+    let count = 5;
+    let view: Html<()> = html! {
+        match count {
+            n if n > 0 => {
+                if n > 10 {
+                    <strong>"big"</strong>
+                } else {
+                    <em>"small"</em>
+                }
+            },
+            _ => {
+                <p>"zero"</p>
+            },
+        }
+    };
+    assert_eq!(view.render(), "<em>small</em>");
+}
+
+#[test]
+fn match_with_for_inside() {
+    let items = ["a", "b", "c"];
+    let view: Html<()> = html! {
+        <ul>
+            match true {
+                true => {
+                    for item in items {
+                        <li>{ item }</li>
+                    }
+                },
+                false => {
+                    <li>"empty"</li>
+                },
+            }
+        </ul>
+    };
+    assert_eq!(
+        view.render(),
+        "<ul><li>a</li><li>b</li><li>c</li></ul>"
+    );
+}
+
+#[test]
+fn match_at_root() {
+    let kind = "hello";
+    let view: Html<()> = html! {
+        match kind {
+            "hello" => {
+                <h1>"Greetings!"</h1>
+            },
+            _ => {
+                <p>"whatever"</p>
+            },
+        }
+    };
+    assert_eq!(view.render(), "<h1>Greetings!</h1>");
+}
+
+#[test]
+fn match_exhaustive_enum() {
+    #[derive(Clone, Copy)]
+    enum Color {
+        Red,
+        Green,
+        Blue,
+    }
+
+    fn render(c: Color) -> Html<()> {
+        html! {
+            match c {
+                Color::Red => {
+                    <span style="color:red">"R"</span>
+                },
+                Color::Green => {
+                    <span style="color:green">"G"</span>
+                },
+                Color::Blue => {
+                    <span style="color:blue">"B"</span>
+                },
+            }
+        }
+    }
+
+    assert_eq!(
+        render(Color::Red).render(),
+        "<span style=\"color:red\">R</span>"
+    );
+    assert_eq!(
+        render(Color::Green).render(),
+        "<span style=\"color:green\">G</span>"
+    );
+    assert_eq!(
+        render(Color::Blue).render(),
+        "<span style=\"color:blue\">B</span>"
+    );
+}
+
+#[test]
+fn match_inside_tag() {
+    let kind = 1;
+    let view: Html<()> = html! {
+        <div>
+            match kind {
+                1 => {
+                    <p>"one"</p>
+                },
+                2 => {
+                    <p>"two"</p>
+                },
+                _ => {
+                    <p>"many"</p>
+                },
+            }
+        </div>
+    };
+    assert_eq!(view.render(), "<div><p>one</p></div>");
+}
+
+#[test]
+fn diffing_match_switching_arms() {
+    fn render(n: i32) -> Html<()> {
+        html! {
+            match n {
+                0 => {
+                    <p>"zero"</p>
+                },
+                _ => {
+                    <p>"non-zero"</p>
+                },
+            }
+        }
+    }
+
+    let a = render(0);
+    let b = render(1);
+    // Each arm produces a self-contained Html; switching arms replaces
+    // the entire inner Html, so only the `fixed` part changes.
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "f": ["<p>non-zero</p>"]
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn diffing_match_with_dynamic() {
+    fn render(n: i32) -> Html<()> {
+        html! {
+            match n {
+                0 => {
+                    <p>{ "zero" }</p>
+                },
+                _ => {
+                    <p>{ "non-zero" }</p>
+                },
+            }
+        }
+    }
+
+    let a = render(0);
+    let b = render(1);
+    // When arms use `{ }` (dynamic blocks), the `fixed` parts are the same
+    // (`<p></p>`) and only the inner dynamic changes.
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "d": {
+                        "0": "non-zero"
+                    }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn diffing_match_arm_same_no_diff() {
+    fn render(n: i32) -> Html<()> {
+        html! {
+            match n {
+                0 => {
+                    <p>"zero"</p>
+                },
+                _ => {
+                    <p>"non-zero"</p>
+                },
+            }
+        }
+    }
+
+    let a = render(0);
+    let b = render(0);
+    assert_json_diff::assert_json_eq!(pretty_print(a.diff(&b)), json!(null));
+}
+
+// ---------------------------------------------------------------------------
+// if tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn if_without_else() {
+    fn render(show: bool) -> Html<()> {
+        html! {
+            if show {
+                <p>"visible"</p>
+            }
+        }
+    }
+    assert_eq!(render(true).render(), "<p>visible</p>");
+    assert_eq!(render(false).render(), "");
+}
+
+#[test]
+fn if_multiple_nodes() {
+    let view: Html<()> = html! {
+        if true {
+            <p>"first"</p>
+            <p>"second"</p>
+            <p>"third"</p>
+        }
+    };
+    assert_eq!(view.render(), "<p>first</p><p>second</p><p>third</p>");
+}
+
+#[test]
+fn if_with_for_inside() {
+    let items = [1, 2, 3];
+    let view: Html<()> = html! {
+        if true {
+            for item in items {
+                <span>{ item }</span>
+            }
+        }
+    };
+    assert_eq!(view.render(), "<span>1</span><span>2</span><span>3</span>");
+}
+
+#[test]
+fn if_with_match_inside() {
+    let view: Html<()> = html! {
+        if true {
+            match 2 {
+                1 => {
+                    <p>"one"</p>
+                },
+                2 => {
+                    <p>"two"</p>
+                },
+                _ => {
+                    <p>"other"</p>
+                },
+            }
+        }
+    };
+    assert_eq!(view.render(), "<p>two</p>");
+}
+
+#[test]
+fn if_nested() {
+    let outer = true;
+    let inner = false;
+    let view: Html<()> = html! {
+        if outer {
+            if inner {
+                <p>"both"</p>
+            } else {
+                <p>"outer only"</p>
+            }
+        }
+    };
+    assert_eq!(view.render(), "<p>outer only</p>");
+}
+
+#[test]
+fn diffing_if_condition_change() {
+    fn render(flag: bool) -> Html<()> {
+        html! {
+            if flag {
+                <p>"yes"</p>
+            } else {
+                <p>"no"</p>
+            }
+        }
+    }
+
+    let a = render(true);
+    let b = render(false);
+    // Literal text inside tags is baked into `fixed`, so the entire
+    // fixed part changes when switching branches.
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "f": ["<p>no</p>"]
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn diffing_if_with_dynamic() {
+    fn render(flag: bool) -> Html<()> {
+        html! {
+            if flag {
+                <p>{ "yes" }</p>
+            } else {
+                <p>{ "no" }</p>
+            }
+        }
+    }
+
+    let a = render(true);
+    let b = render(false);
+    // With `{ }` blocks the fixed parts stay the same; only the
+    // inner dynamic fragment changes.
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "d": {
+                        "0": "no"
+                    }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn diffing_if_multiple_nodes_change() {
+    fn render(flag: bool) -> Html<()> {
+        html! {
+            if flag {
+                <p>"a"</p>
+                <p>"b"</p>
+            } else {
+                <span>"single"</span>
+            }
+        }
+    }
+
+    let a = render(true);
+    let b = render(false);
+    // When the branch changes, the entire nested Html is replaced;
+    // the `fixed` part of the inner Html reflects the new branch content.
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "f": ["<span>single</span>"]
+                }
+            }
+        })
+    );
+}
+
+// ---------------------------------------------------------------------------
+// for tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn for_loop_empty() {
+    fn render(items: &[i32]) -> Html<()> {
+        html! {
+            <ul>
+                for item in items {
+                    <li>{ item }</li>
+                }
+            </ul>
+        }
+    }
+    assert_eq!(render(&[]).render(), "<ul></ul>");
+}
+
+#[test]
+fn for_loop_single() {
+    let view: Html<()> = html! {
+        <ul>
+            for x in [42] {
+                <li>{ x }</li>
+            }
+        </ul>
+    };
+    assert_eq!(view.render(), "<ul><li>42</li></ul>");
+}
+
+#[test]
+fn for_loop_nested() {
+    let xs = [1, 2];
+    let ys = ["a", "b"];
+    let view: Html<()> = html! {
+        <table>
+            for x in xs {
+                <tr>
+                    for y in ys {
+                        <td>{ x }{ y }</td>
+                    }
+                </tr>
+            }
+        </table>
+    };
+    assert_eq!(
+        view.render(),
+        concat!(
+            "<table>",
+            "<tr><td>1a</td><td>1b</td></tr>",
+            "<tr><td>2a</td><td>2b</td></tr>",
+            "</table>",
+        )
+    );
+}
+
+#[test]
+fn for_loop_with_match_inside() {
+    let items = [1, 2, 3];
+    let view: Html<()> = html! {
+        <ul>
+            for item in items {
+                match item % 2 {
+                    0 => {
+                        <li class="even">{ item }</li>
+                    },
+                    _ => {
+                        <li class="odd">{ item }</li>
+                    },
+                }
+            }
+        </ul>
+    };
+    assert_eq!(
+        view.render(),
+        concat!(
+            "<ul>",
+            "<li class=\"odd\">1</li>",
+            "<li class=\"even\">2</li>",
+            "<li class=\"odd\">3</li>",
+            "</ul>",
+        )
+    );
+}
+
+#[test]
+fn for_loop_with_dynamic_attribute() {
+    let items = [1, 2];
+    let view: Html<()> = html! {
+        <ul>
+            for item in items {
+                <li data-index={ item }>{ item }</li>
+            }
+        </ul>
+    };
+    assert_eq!(
+        view.render(),
+        concat!("<ul>", "<li data-index=\"1\">1</li>", "<li data-index=\"2\">2</li>", "</ul>",)
+    );
+}
+
+#[test]
+fn for_loop_multiple_dynamics() {
+    let items = [(1, "a"), (2, "b")];
+    let view: Html<()> = html! {
+        <ul>
+            for (n, s) in items {
+                <li>
+                    <strong>{ n }</strong>
+                    ": "
+                    <em>{ s }</em>
+                </li>
+            }
+        </ul>
+    };
+    assert_eq!(
+        view.render(),
+        concat!(
+            "<ul>",
+            "<li><strong>1</strong>: <em>a</em></li>",
+            "<li><strong>2</strong>: <em>b</em></li>",
+            "</ul>",
+        )
+    );
+}
+
+#[test]
+fn for_loop_no_container() {
+    let items = ["x", "y"];
+    let view: Html<()> = html! {
+        for item in items {
+            <span>{ item }</span>
+        }
+    };
+    assert_eq!(view.render(), "<span>x</span><span>y</span>");
+}
+
+#[test]
+fn diffing_for_loop_length_change() {
+    fn render(ns: &[i32]) -> Html<()> {
+        html! {
+            <ul>
+                for n in ns {
+                    <li>{ n }</li>
+                }
+            </ul>
+        }
+    }
+
+    // adding an iteration
+    let a = render(&[1, 2]);
+    let b = render(&[1, 2, 3]);
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "b": {
+                        "2": { "0": "3" }
+                    }
+                }
+            }
+        })
+    );
+
+    // removing an iteration
+    let a = render(&[1, 2, 3]);
+    let b = render(&[1, 2]);
+    assert_json_diff::assert_json_eq!(
+        pretty_print(a.diff(&b)),
+        json!({
+            "d": {
+                "0": {
+                    "b": {
+                        "2": null
+                    }
+                }
+            }
         })
     );
 }

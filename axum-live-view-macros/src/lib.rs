@@ -499,7 +499,7 @@ impl Parse for Match {
 struct Arm {
     pat: syn::Pat,
     guard: Option<syn::Expr>,
-    body: syn::Expr,
+    body: Tree,
 }
 
 impl Parse for Arm {
@@ -515,7 +515,9 @@ impl Parse for Arm {
 
         input.parse::<Token![=>]>()?;
 
-        let body = input.parse::<syn::Expr>()?;
+        let content;
+        syn::braced!(content in input);
+        let body = content.parse::<Tree>()?;
 
         input.parse::<Token![,]>()?;
 
@@ -855,6 +857,7 @@ impl NodeToTokens for Match {
             .iter()
             .map(|Arm { pat, guard, body }| {
                 let guard = guard.as_ref().map(|guard| quote! { if #guard });
+                let body = ToTokensViaNodeToTokens(body);
                 quote! {
                     #pat #guard => __dynamic.push_fragment(#body),
                 }
